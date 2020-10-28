@@ -1,0 +1,241 @@
+SampleID	Env	SourceSink	id
+B01-coarse-16S	Rhizome	Source	1
+B01-rhizo-16s	Rhizosphere	Source	1
+B01-soil-16s	Bulk soil	Source	1
+B01-fine-16s	Fine root	Sink	1
+B03-rhizo-16s	Rhizosphere	Source	2
+B03-soil-16s	Bulk soil	Source	2
+B03-coarse-16S	Rhizome	Source	2
+B03-fine-16s	Fine root	Sink	2
+B07-rhizo-16s	Rhizosphere	Source	5
+B07-soil-16s	Bulk soil	Source	5
+B07-coarse-16S	Rhizome	Source	5
+B07-fine-16s	Fine root	Sink	5
+B09-soil-16s	Bulk soil	Source	7
+B09-rhizo-16s	Rhizosphere	Source	7
+B09-coarse-16S	Rhizome	Source	7
+B09-fine-16s	Fine root	Sink	7
+B10-rhizo-16s	Rhizosphere	Source	8
+B10-coarse-16S	Rhizome	Source	8
+B10-soil-16s	Bulk soil	Source	8
+B10-fine-16s	Fine root	Sink	8
+B11-coarse-16S	Rhizome	Source	9
+B11-soil-16s	Bulk soil	Source	9
+B11-rhizo-16s	Rhizosphere	Source	9
+B11-fine-16s	Fine root	Sink	9
+B12-rhizo-16s	Rhizosphere	Source	10
+B12-coarse-16S	Rhizome	Source	10
+B12-soil-16s	Bulk soil	Source	10
+B12-fine-16s	Fine root	Sink	10
+B13-coarse-16S	Rhizome	Source	11
+B13-soil-16s	Bulk soil	Source	11
+B13-rhizo-16s	Rhizosphere	Source	11
+B13-fine-16s	Fine root	Sink	11
+B14-soil-16s	Bulk soil	Source	12
+B14-coarse-16S	Rhizome	Source	12
+B14-rhizo-16s	Rhizosphere	Source	12
+B14-fine-16s	Fine root	Sink	12
+B15-rhizo-16s	Rhizosphere	Source	13
+B15-soil-16s	Bulk soil	Source	13
+B15-coarse-16S	Rhizome	Source	13
+B15-fine-16s	Fine root	Sink	13
+B16-soil-16s	Bulk soil	Source	14
+B16-rhizo-16s	Rhizosphere	Source	14
+B16-coarse-16S	Rhizome	Source	14
+B16-fine-16s	Fine root	Sink	14
+B17-coarse-16S	Rhizome	Source	15
+B17-rhizo-16s	Rhizosphere	Source	15
+B17-soil-16s	Bulk soil	Source	15
+B17-fine-16s	Fine root	Sink	15
+B18-soil-16s	Bulk soil	Source	16
+B18-rhizo-16s	Rhizosphere	Source	16
+B18-coarse-16S	Rhizome	Source	16
+B18-fine-16s	Fine root	Sink	16
+U01-coarse-16S	Rhizome	Source	17
+U01-rhizo-16s	Rhizosphere	Source	17
+U01-soil-16s	Bulk soil	Source	17
+U01-fine-16s	Fine root	Sink	17
+U02-soil-16s	Bulk soil	Source	18
+U02-rhizo-16s	Rhizosphere	Source	18
+U02-coarse-16S	Rhizome	Source	18
+U02-fine-16s	Fine root	Sink	18
+U03-soil-16s	Bulk soil	Source	19
+U03-rhizo-16s	Rhizosphere	Source	19
+U03-coarse-16S	Rhizome	Source	19
+U03-fine-16s	Fine root	Sink	19
+U04-soil-16s	Bulk soil	Source	20
+U04-rhizo-16s	Rhizosphere	Source	20
+U04-coarse-16S	Rhizome	Source	20
+U04-fine-16s	Fine root	Sink	20
+U05-rhizo-16s	Rhizosphere	Source	21
+U05-soil-16s_redo	Bulk soil	Source	21
+U05-coarse-16S	Rhizome	Source	21
+U05-fine-16s	Fine root	Sink	21
+U06-coarse-16S	Rhizome	Source	22
+U06-rhizo-16s	Rhizosphere	Source	22
+U06-soil-16s	Bulk soil	Source	22
+U06-fine-16s	Fine root	Sink	22
+U07-soil-16s	Bulk soil	Source	23
+U07-coarse-16S	Rhizome	Source	23
+U07-rhizo-16s	Rhizosphere	Source	23
+U07-fine-16s	Fine root	Sink	23
+U08-rhizo-16s	Rhizosphere	Source	24
+U08-coarse-16S	Rhizome	Source	24
+U08-soil-16s	Bulk soil	Source	24
+U08-fine-16s	Fine root	Sink	24
+B04-coarse-16S	Rhizome	Source	25
+B04-soil-16s	Bulk soil	Source	25
+B04-rhizo-16s	Rhizosphere	Source	25
+B-unk-stem-16S	Stem	Sink	25
+B11-coarse-16S	Rhizome	Source	26
+B11-soil-16s	Bulk soil	Source	26
+B11-rhizo-16s	Rhizosphere	Source	26
+B-unk-stem2-16S	Stem	Sink	26
+B01-coarse-16S	Rhizome	Source	27
+B01-rhizo-16s	Rhizosphere	Source	27
+B01-soil-16s	Bulk soil	Source	27
+B01-leaves-16S	Leaf	Sink	27
+B01-coarse-16S	Rhizome	Source	28
+B01-rhizo-16s	Rhizosphere	Source	28
+B01-soil-16s	Bulk soil	Source	28
+B01-stem-16S	Stem	Sink	28
+B03-rhizo-16s	Rhizosphere	Source	31
+B03-soil-16s	Bulk soil	Source	31
+B03-coarse-16S	Rhizome	Source	31
+B03-leaves-16S	Leaf	Sink	31
+B04-coarse-16S	Rhizome	Source	32
+B04-soil-16s	Bulk soil	Source	32
+B04-rhizo-16s	Rhizosphere	Source	32
+B04-fine-16S	Fine root	Sink	32
+B04-coarse-16S	Rhizome	Source	33
+B04-soil-16s	Bulk soil	Source	33
+B04-rhizo-16s	Rhizosphere	Source	33
+B04-leaves-16S	Leaf	Sink	33
+B07-rhizo-16s	Rhizosphere	Source	38
+B07-soil-16s	Bulk soil	Source	38
+B07-coarse-16S	Rhizome	Source	38
+B07-leaves-16S	Leaf	Sink	38
+B07-rhizo-16s	Rhizosphere	Source	39
+B07-soil-16s	Bulk soil	Source	39
+B07-coarse-16S	Rhizome	Source	39
+B07-stem-16S	Stem	Sink	39
+B09-soil-16s	Bulk soil	Source	42
+B09-rhizo-16s	Rhizosphere	Source	42
+B09-coarse-16S	Rhizome	Source	42
+B09-leaves-16S	Leaf	Sink	42
+B09-soil-16s	Bulk soil	Source	43
+B09-rhizo-16s	Rhizosphere	Source	43
+B09-coarse-16S	Rhizome	Source	43
+B09-stem-16S	Stem	Sink	43
+B10-rhizo-16s	Rhizosphere	Source	44
+B10-coarse-16S	Rhizome	Source	44
+B10-soil-16s	Bulk soil	Source	44
+B10-leaves-16S	Leaf	Sink	44
+B11-coarse-16S	Rhizome	Source	45
+B11-soil-16s	Bulk soil	Source	45
+B11-rhizo-16s	Rhizosphere	Source	45
+B11-leaves-16S	Leaf	Sink	45
+B12-rhizo-16s	Rhizosphere	Source	46
+B12-coarse-16S	Rhizome	Source	46
+B12-soil-16s	Bulk soil	Source	46
+B12-leaves-16S	Leaf	Sink	46
+B13-coarse-16S	Rhizome	Source	47
+B13-soil-16s	Bulk soil	Source	47
+B13-rhizo-16s	Rhizosphere	Source	47
+B13-stem-16S	Stem	Sink	47
+B14-soil-16s	Bulk soil	Source	48
+B14-coarse-16S	Rhizome	Source	48
+B14-rhizo-16s	Rhizosphere	Source	48
+B14-leaves-16S	Leaf	Sink	48
+B14-soil-16s	Bulk soil	Source	49
+B14-coarse-16S	Rhizome	Source	49
+B14-rhizo-16s	Rhizosphere	Source	49
+B14-stem-16S	Stem	Sink	49
+B15-rhizo-16s	Rhizosphere	Source	50
+B15-soil-16s	Bulk soil	Source	50
+B15-coarse-16S	Rhizome	Source	50
+B15-leaves-16S	Leaf	Sink	50
+B15-rhizo-16s	Rhizosphere	Source	51
+B15-soil-16s	Bulk soil	Source	51
+B15-coarse-16S	Rhizome	Source	51
+B15-stem-16S	Stem	Sink	51
+B16-soil-16s	Bulk soil	Source	52
+B16-rhizo-16s	Rhizosphere	Source	52
+B16-coarse-16S	Rhizome	Source	52
+B16-leaves-16S	Leaf	Sink	52
+B16-soil-16s	Bulk soil	Source	53
+B16-rhizo-16s	Rhizosphere	Source	53
+B16-coarse-16S	Rhizome	Source	53
+B16-stem-16S	Stem	Sink	53
+B17-coarse-16S	Rhizome	Source	54
+B17-rhizo-16s	Rhizosphere	Source	54
+B17-soil-16s	Bulk soil	Source	54
+B17-leaves-16S	Leaf	Sink	54
+B17-coarse-16S	Rhizome	Source	55
+B17-rhizo-16s	Rhizosphere	Source	55
+B17-soil-16s	Bulk soil	Source	55
+B17-stem-16S	Stem	Sink	55
+B18-soil-16s	Bulk soil	Source	56
+B18-rhizo-16s	Rhizosphere	Source	56
+B18-coarse-16S	Rhizome	Source	56
+B18-leaves-16S	Leaf	Sink	56
+B18-soil-16s	Bulk soil	Source	57
+B18-rhizo-16s	Rhizosphere	Source	57
+B18-coarse-16S	Rhizome	Source	57
+B18-stem-16S	Stem	Sink	57
+U01-coarse-16S	Rhizome	Source	58
+U01-rhizo-16s	Rhizosphere	Source	58
+U01-soil-16s	Bulk soil	Source	58
+U01-leaves-16S	Leaf	Sink	58
+U02-soil-16s	Bulk soil	Source	59
+U02-rhizo-16s	Rhizosphere	Source	59
+U02-coarse-16S	Rhizome	Source	59
+U02-leaves-16S	Leaf	Sink	59
+U02-soil-16s	Bulk soil	Source	60
+U02-rhizo-16s	Rhizosphere	Source	60
+U02-coarse-16S	Rhizome	Source	60
+U02-stem-16S	Stem	Sink	60
+U03-soil-16s	Bulk soil	Source	61
+U03-rhizo-16s	Rhizosphere	Source	61
+U03-coarse-16S	Rhizome	Source	61
+U03-leaves-16S	Leaf	Sink	61
+U04-soil-16s	Bulk soil	Source	62
+U04-rhizo-16s	Rhizosphere	Source	62
+U04-coarse-16S	Rhizome	Source	62
+U04-leaves-16S	Leaf	Sink	62
+U05-rhizo-16s	Rhizosphere	Source	63
+U05-soil-16s_redo	Bulk soil	Source	63
+U05-coarse-16S	Rhizome	Source	63
+U05-leaves-16S	Leaf	Sink	63
+U06-coarse-16S	Rhizome	Source	64
+U06-rhizo-16s	Rhizosphere	Source	64
+U06-soil-16s	Bulk soil	Source	64
+U06-leaves-16S	Leaf	Sink	64
+U06-coarse-16S	Rhizome	Source	65
+U06-rhizo-16s	Rhizosphere	Source	65
+U06-soil-16s	Bulk soil	Source	65
+U06-stem-16S	Stem	Sink	65
+U07-soil-16s	Bulk soil	Source	66
+U07-coarse-16S	Rhizome	Source	66
+U07-rhizo-16s	Rhizosphere	Source	66
+U07-leaves-16S	Leaf	Sink	66
+U07-soil-16s	Bulk soil	Source	67
+U07-coarse-16S	Rhizome	Source	67
+U07-rhizo-16s	Rhizosphere	Source	67
+U07-stem-16S	Stem	Sink	67
+U08-rhizo-16s	Rhizosphere	Source	68
+U08-coarse-16S	Rhizome	Source	68
+U08-soil-16s	Bulk soil	Source	68
+U08-leaves-16S	Leaf	Sink	68
+U08-rhizo-16s	Rhizosphere	Source	69
+U08-coarse-16S	Rhizome	Source	69
+U08-soil-16s	Bulk soil	Source	69
+U08-stem-16S	Stem	Sink	69
+U09-soil-16s	Bulk soil	Source	70
+U09-coarse-16S-C	Rhizome	Source	70
+U09-rhizo-16s	Rhizosphere	Source	70
+U09-leaves-16S	Leaf	Sink	70
+U09-soil-16s	Bulk soil	Source	71
+U09-coarse-16S-C	Rhizome	Source	71
+U09-rhizo-16s	Rhizosphere	Source	71
+U09-stem-16S	Stem	Sink	71

@@ -1,0 +1,321 @@
+SampleID	Env	SourceSink	id
+B04-coarse-ITS	Rhizome	Source	1
+B04-soil-ITS-B	Bulk soil	Source	1
+B04-rhizo-ITS	Rhizosphere	Source	1
+B-unk-stem-ITS_redo	Stem	Sink	1
+B11-coarse-ITS_redo	Rhizome	Source	2
+B11-soil-ITS	Bulk soil	Source	2
+B11-rhizo-ITS	Rhizosphere	Source	2
+B-unk-stem2-ITS_redo	Stem	Sink	2
+B02-rhizo-ITS	Rhizosphere	Source	3
+B02-soil-ITS	Bulk soil	Source	3
+B02-coarse-ITS	Rhizome	Source	3
+B02-stem-ITS_redo	Stem	Sink	3
+B03-soil-ITS	Bulk soil	Source	4
+B03-coarse-ITS	Rhizome	Source	4
+B03-rhizo-ITS	Rhizosphere	Source	4
+B03-stem-ITS_redo	Stem	Sink	4
+B07-coarse-ITS	Rhizome	Source	5
+B07-soil-ITS	Bulk soil	Source	5
+B07-rhizo-ITS	Rhizosphere	Source	5
+B07-fine-ITS_redo	Fine root	Sink	5
+B08-soil-ITS	Bulk soil	Source	6
+B08-rhizo-ITS	Rhizosphere	Source	6
+B08-coarse-ITS	Rhizome	Source	6
+B08-stem-ITS_redo	Stem	Sink	6
+B09-soil-ITS	Bulk soil	Source	7
+B09-coarse-ITS	Rhizome	Source	7
+B09-rhizo-ITS	Rhizosphere	Source	7
+B09-stem-ITS_redo	Stem	Sink	7
+B10-soil-ITS	Bulk soil	Source	8
+B10-coarse-ITS	Rhizome	Source	8
+B10-rhizo-ITS	Rhizosphere	Source	8
+B10-stem-ITS_redo	Stem	Sink	8
+B14-soil-ITS	Bulk soil	Source	9
+B14-coarse-ITS	Rhizome	Source	9
+B14-rhizo-ITS	Rhizosphere	Source	9
+B14-stem-ITS_redo	Stem	Sink	9
+B15-coarse-ITS_redo	Rhizome	Source	10
+B15-rhizo-ITS	Rhizosphere	Source	10
+B15-soil-ITS	Bulk soil	Source	10
+B15-stem-ITS_redo	Stem	Sink	10
+B16-soil-ITS	Bulk soil	Source	11
+B16-coarse-ITS	Rhizome	Source	11
+B16-rhizo-ITS	Rhizosphere	Source	11
+B16-stem-ITS_redo	Stem	Sink	11
+U03-soil-ITS	Bulk soil	Source	12
+U03-coarse-ITS	Rhizome	Source	12
+U03-rhizo-ITS	Rhizosphere	Source	12
+U03-stem-ITS_redo	Stem	Sink	12
+U06-soil-ITS	Bulk soil	Source	13
+U06-rhizo-ITS	Rhizosphere	Source	13
+U06-coarse-ITS	Rhizome	Source	13
+U06-stem-ITS_redo	Stem	Sink	13
+U07-soil-ITS	Bulk soil	Source	14
+U07-rhizo-ITS	Rhizosphere	Source	14
+U07-coarse-ITS	Rhizome	Source	14
+U07-stem-ITS_redo	Stem	Sink	14
+U08-rhizo-ITS	Rhizosphere	Source	15
+U08-soil-ITS	Bulk soil	Source	15
+U08-coarse-ITS	Rhizome	Source	15
+U08-stem-ITS_redo	Stem	Sink	15
+B02-rhizo-ITS	Rhizosphere	Source	16
+B02-soil-ITS	Bulk soil	Source	16
+B02-coarse-ITS	Rhizome	Source	16
+B02-leaves-ITS-D	Leaf	Sink	16
+B01-soil-ITS	Bulk soil	Source	17
+B01-coarse-ITS	Rhizome	Source	17
+B01-rhizo-ITS	Rhizosphere	Source	17
+B01-fine-ITS	Fine root	Sink	17
+B02-rhizo-ITS	Rhizosphere	Source	18
+B02-soil-ITS	Bulk soil	Source	18
+B02-coarse-ITS	Rhizome	Source	18
+B02-fine-ITS	Fine root	Sink	18
+B03-soil-ITS	Bulk soil	Source	19
+B03-coarse-ITS	Rhizome	Source	19
+B03-rhizo-ITS	Rhizosphere	Source	19
+B03-fine-ITS	Fine root	Sink	19
+B05-coarse-ITS	Rhizome	Source	20
+B05-soil-ITS	Bulk soil	Source	20
+B05-rhizo-ITS	Rhizosphere	Source	20
+B05-fine-ITS	Fine root	Sink	20
+B06-coarse-ITS	Rhizome	Source	21
+B06-soil-ITS	Bulk soil	Source	21
+B06-rhizo-ITS	Rhizosphere	Source	21
+B06-fine-ITS	Fine root	Sink	21
+B08-soil-ITS	Bulk soil	Source	22
+B08-rhizo-ITS	Rhizosphere	Source	22
+B08-coarse-ITS	Rhizome	Source	22
+B08-fine-ITS-2	Fine root	Sink	22
+B09-soil-ITS	Bulk soil	Source	23
+B09-coarse-ITS	Rhizome	Source	23
+B09-rhizo-ITS	Rhizosphere	Source	23
+B09-fine-ITS	Fine root	Sink	23
+B10-soil-ITS	Bulk soil	Source	24
+B10-coarse-ITS	Rhizome	Source	24
+B10-rhizo-ITS	Rhizosphere	Source	24
+B10-fine-ITS	Fine root	Sink	24
+B11-coarse-ITS_redo	Rhizome	Source	25
+B11-soil-ITS	Bulk soil	Source	25
+B11-rhizo-ITS	Rhizosphere	Source	25
+B11-fine-ITS	Fine root	Sink	25
+B12-coarse-ITS	Rhizome	Source	26
+B12-soil-ITS	Bulk soil	Source	26
+B12-rhizo-ITS	Rhizosphere	Source	26
+B12-fine-ITS	Fine root	Sink	26
+B13-soil-ITS	Bulk soil	Source	27
+B13-rhizo-ITS	Rhizosphere	Source	27
+B13-coarse-ITS_redo	Rhizome	Source	27
+B13-fine-ITS	Fine root	Sink	27
+B14-soil-ITS	Bulk soil	Source	28
+B14-coarse-ITS	Rhizome	Source	28
+B14-rhizo-ITS	Rhizosphere	Source	28
+B14-fine-ITS	Fine root	Sink	28
+B15-coarse-ITS_redo	Rhizome	Source	29
+B15-rhizo-ITS	Rhizosphere	Source	29
+B15-soil-ITS	Bulk soil	Source	29
+B15-fine-ITS	Fine root	Sink	29
+B16-soil-ITS	Bulk soil	Source	30
+B16-coarse-ITS	Rhizome	Source	30
+B16-rhizo-ITS	Rhizosphere	Source	30
+B16-fine-ITS	Fine root	Sink	30
+B17-soil-ITS	Bulk soil	Source	31
+B17-coarse-ITS	Rhizome	Source	31
+B17-rhizo-ITS	Rhizosphere	Source	31
+B17-fine-ITS	Fine root	Sink	31
+B18-coarse-ITS-D	Rhizome	Source	32
+B18-soil-ITS	Bulk soil	Source	32
+B18-rhizo-ITS	Rhizosphere	Source	32
+B18-fine-ITS	Fine root	Sink	32
+U01-coarse-ITS	Rhizome	Source	33
+U01-soil-ITS	Bulk soil	Source	33
+U01-rhizo-ITS	Rhizosphere	Source	33
+U01-fine-ITS	Fine root	Sink	33
+U02-soil-ITS	Bulk soil	Source	34
+U02-coarse-ITS	Rhizome	Source	34
+U02-rhizo-ITS	Rhizosphere	Source	34
+U02-fine-ITS	Fine root	Sink	34
+U03-soil-ITS	Bulk soil	Source	35
+U03-coarse-ITS	Rhizome	Source	35
+U03-rhizo-ITS	Rhizosphere	Source	35
+U03-fine-ITS	Fine root	Sink	35
+U04-coarse-ITS	Rhizome	Source	36
+U04-rhizo-ITS	Rhizosphere	Source	36
+U04-soil-ITS	Bulk soil	Source	36
+U04-fine-ITS	Fine root	Sink	36
+U05-rhizo-ITS	Rhizosphere	Source	37
+U05-coarse-ITS	Rhizome	Source	37
+U05-soil-ITS	Bulk soil	Source	37
+U05-fine-ITS	Fine root	Sink	37
+U06-soil-ITS	Bulk soil	Source	38
+U06-rhizo-ITS	Rhizosphere	Source	38
+U06-coarse-ITS	Rhizome	Source	38
+U06-fine-ITS	Fine root	Sink	38
+U07-soil-ITS	Bulk soil	Source	39
+U07-rhizo-ITS	Rhizosphere	Source	39
+U07-coarse-ITS	Rhizome	Source	39
+U07-fine-ITS	Fine root	Sink	39
+U08-rhizo-ITS	Rhizosphere	Source	40
+U08-soil-ITS	Bulk soil	Source	40
+U08-coarse-ITS	Rhizome	Source	40
+U08-fine-ITS	Fine root	Sink	40
+B01-soil-ITS	Bulk soil	Source	41
+B01-coarse-ITS	Rhizome	Source	41
+B01-rhizo-ITS	Rhizosphere	Source	41
+B01-leaves-ITS	Leaf	Sink	41
+B01-soil-ITS	Bulk soil	Source	42
+B01-coarse-ITS	Rhizome	Source	42
+B01-rhizo-ITS	Rhizosphere	Source	42
+B01-stem-ITS	Stem	Sink	42
+B03-soil-ITS	Bulk soil	Source	43
+B03-coarse-ITS	Rhizome	Source	43
+B03-rhizo-ITS	Rhizosphere	Source	43
+B03-leaves-ITS	Leaf	Sink	43
+B04-coarse-ITS	Rhizome	Source	44
+B04-soil-ITS-B	Bulk soil	Source	44
+B04-rhizo-ITS	Rhizosphere	Source	44
+B04-fine-ITS	Fine root	Sink	44
+B04-coarse-ITS	Rhizome	Source	45
+B04-soil-ITS-B	Bulk soil	Source	45
+B04-rhizo-ITS	Rhizosphere	Source	45
+B04-leaves-ITS	Leaf	Sink	45
+B05-coarse-ITS	Rhizome	Source	46
+B05-soil-ITS	Bulk soil	Source	46
+B05-rhizo-ITS	Rhizosphere	Source	46
+B05-leaves-ITS	Leaf	Sink	46
+B05-coarse-ITS	Rhizome	Source	47
+B05-soil-ITS	Bulk soil	Source	47
+B05-rhizo-ITS	Rhizosphere	Source	47
+B05-stem-ITS	Stem	Sink	47
+B06-coarse-ITS	Rhizome	Source	48
+B06-soil-ITS	Bulk soil	Source	48
+B06-rhizo-ITS	Rhizosphere	Source	48
+B06-leaves-ITS	Leaf	Sink	48
+B06-coarse-ITS	Rhizome	Source	49
+B06-soil-ITS	Bulk soil	Source	49
+B06-rhizo-ITS	Rhizosphere	Source	49
+B06-stem-ITS	Stem	Sink	49
+B07-coarse-ITS	Rhizome	Source	50
+B07-soil-ITS	Bulk soil	Source	50
+B07-rhizo-ITS	Rhizosphere	Source	50
+B07-leaves-ITS	Leaf	Sink	50
+B07-coarse-ITS	Rhizome	Source	51
+B07-soil-ITS	Bulk soil	Source	51
+B07-rhizo-ITS	Rhizosphere	Source	51
+B07-stem-ITS	Stem	Sink	51
+B08-soil-ITS	Bulk soil	Source	52
+B08-rhizo-ITS	Rhizosphere	Source	52
+B08-coarse-ITS	Rhizome	Source	52
+B08-leaves-ITS	Leaf	Sink	52
+B09-soil-ITS	Bulk soil	Source	53
+B09-coarse-ITS	Rhizome	Source	53
+B09-rhizo-ITS	Rhizosphere	Source	53
+B09-leaves-ITS	Leaf	Sink	53
+B10-soil-ITS	Bulk soil	Source	54
+B10-coarse-ITS	Rhizome	Source	54
+B10-rhizo-ITS	Rhizosphere	Source	54
+B10-leaves-ITS	Leaf	Sink	54
+B11-coarse-ITS_redo	Rhizome	Source	55
+B11-soil-ITS	Bulk soil	Source	55
+B11-rhizo-ITS	Rhizosphere	Source	55
+B11-leaves-ITS	Leaf	Sink	55
+B12-coarse-ITS	Rhizome	Source	56
+B12-soil-ITS	Bulk soil	Source	56
+B12-rhizo-ITS	Rhizosphere	Source	56
+B12-leaves-ITS	Leaf	Sink	56
+B12-coarse-ITS	Rhizome	Source	57
+B12-soil-ITS	Bulk soil	Source	57
+B12-rhizo-ITS	Rhizosphere	Source	57
+B12-stem-ITS	Stem	Sink	57
+B13-soil-ITS	Bulk soil	Source	58
+B13-rhizo-ITS	Rhizosphere	Source	58
+B13-coarse-ITS_redo	Rhizome	Source	58
+B13-leaves-ITS	Leaf	Sink	58
+B13-soil-ITS	Bulk soil	Source	59
+B13-rhizo-ITS	Rhizosphere	Source	59
+B13-coarse-ITS_redo	Rhizome	Source	59
+B13-stem-ITS	Stem	Sink	59
+B14-soil-ITS	Bulk soil	Source	60
+B14-coarse-ITS	Rhizome	Source	60
+B14-rhizo-ITS	Rhizosphere	Source	60
+B14-leaves-ITS	Leaf	Sink	60
+B15-coarse-ITS_redo	Rhizome	Source	61
+B15-rhizo-ITS	Rhizosphere	Source	61
+B15-soil-ITS	Bulk soil	Source	61
+B15-leaves-ITS	Leaf	Sink	61
+B16-soil-ITS	Bulk soil	Source	62
+B16-coarse-ITS	Rhizome	Source	62
+B16-rhizo-ITS	Rhizosphere	Source	62
+B16-leaves-ITS	Leaf	Sink	62
+B17-soil-ITS	Bulk soil	Source	63
+B17-coarse-ITS	Rhizome	Source	63
+B17-rhizo-ITS	Rhizosphere	Source	63
+B17-leaves-ITS	Leaf	Sink	63
+B17-soil-ITS	Bulk soil	Source	64
+B17-coarse-ITS	Rhizome	Source	64
+B17-rhizo-ITS	Rhizosphere	Source	64
+B17-stem-ITS	Stem	Sink	64
+B18-coarse-ITS-D	Rhizome	Source	65
+B18-soil-ITS	Bulk soil	Source	65
+B18-rhizo-ITS	Rhizosphere	Source	65
+B18-leaves-ITS	Leaf	Sink	65
+B18-coarse-ITS-D	Rhizome	Source	66
+B18-soil-ITS	Bulk soil	Source	66
+B18-rhizo-ITS	Rhizosphere	Source	66
+B18-stem-ITS	Stem	Sink	66
+U01-coarse-ITS	Rhizome	Source	67
+U01-soil-ITS	Bulk soil	Source	67
+U01-rhizo-ITS	Rhizosphere	Source	67
+U01-leaves-ITS	Leaf	Sink	67
+U01-coarse-ITS	Rhizome	Source	68
+U01-soil-ITS	Bulk soil	Source	68
+U01-rhizo-ITS	Rhizosphere	Source	68
+U01-stem-ITS	Stem	Sink	68
+U02-soil-ITS	Bulk soil	Source	69
+U02-coarse-ITS	Rhizome	Source	69
+U02-rhizo-ITS	Rhizosphere	Source	69
+U02-leaves-ITS	Leaf	Sink	69
+U02-soil-ITS	Bulk soil	Source	70
+U02-coarse-ITS	Rhizome	Source	70
+U02-rhizo-ITS	Rhizosphere	Source	70
+U02-stem-ITS	Stem	Sink	70
+U03-soil-ITS	Bulk soil	Source	71
+U03-coarse-ITS	Rhizome	Source	71
+U03-rhizo-ITS	Rhizosphere	Source	71
+U03-leaves-ITS	Leaf	Sink	71
+U04-coarse-ITS	Rhizome	Source	72
+U04-rhizo-ITS	Rhizosphere	Source	72
+U04-soil-ITS	Bulk soil	Source	72
+U04-leaves-ITS	Leaf	Sink	72
+U04-coarse-ITS	Rhizome	Source	73
+U04-rhizo-ITS	Rhizosphere	Source	73
+U04-soil-ITS	Bulk soil	Source	73
+U04-stem-ITS	Stem	Sink	73
+U05-rhizo-ITS	Rhizosphere	Source	74
+U05-coarse-ITS	Rhizome	Source	74
+U05-soil-ITS	Bulk soil	Source	74
+U05-leaves-ITS	Leaf	Sink	74
+U05-rhizo-ITS	Rhizosphere	Source	75
+U05-coarse-ITS	Rhizome	Source	75
+U05-soil-ITS	Bulk soil	Source	75
+U05-stem-ITS	Stem	Sink	75
+U06-soil-ITS	Bulk soil	Source	76
+U06-rhizo-ITS	Rhizosphere	Source	76
+U06-coarse-ITS	Rhizome	Source	76
+U06-leaves-ITS	Leaf	Sink	76
+U07-soil-ITS	Bulk soil	Source	77
+U07-rhizo-ITS	Rhizosphere	Source	77
+U07-coarse-ITS	Rhizome	Source	77
+U07-leaves-ITS	Leaf	Sink	77
+U08-rhizo-ITS	Rhizosphere	Source	78
+U08-soil-ITS	Bulk soil	Source	78
+U08-coarse-ITS	Rhizome	Source	78
+U08-leaves-ITS	Leaf	Sink	78
+U09-rhizo-ITS	Rhizosphere	Source	79
+U09-soil-ITS	Bulk soil	Source	79
+U09-coarse-ITS	Rhizome	Source	79
+U09-leaves-ITS	Leaf	Sink	79
+U09-rhizo-ITS	Rhizosphere	Source	80
+U09-soil-ITS	Bulk soil	Source	80
+U09-coarse-ITS	Rhizome	Source	80
+U09-stem-ITS	Stem	Sink	80
