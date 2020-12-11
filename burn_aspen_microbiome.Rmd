@@ -1,0 +1,2490 @@
+---
+title: "Apen Microbiome with Fire"
+output: html_document
+---
+
+# Download libraries and set theme
+```{r}
+#devtools::install_github("cozygene/FEAST", ref = "Nonunique_sources")
+library(FEAST)
+library(vegan)
+library(phyloseq)
+library(DESeq2)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(hillR)
+library(cowplot)
+library(readxl)
+library(stringr)
+library(viridis)
+library(yaml)
+library(biomformat)
+library(Biostrings)
+library(nlme)
+library(multcomp)
+library(lsmeans)
+library(multcompView)
+library(doParallel)
+library(metagMisc)
+library(tibble)
+library(betareg)
+library(emmeans)
+
+theme_set(theme_cowplot())
+
+theme_update(axis.title = element_text(size = 12), axis.text = element_text(size = 10), 
+             legend.title = element_blank(), legend.text = element_text(size = 10), 
+             title = element_text(size = 12))
+```
+
+# Download and clean-up data
+```{r}
+setwd("~/Desktop/burned_aspen_microbiome")
+# 16S -------------------------------------------------------------
+data_16S <- read_csv2phyloseq(otu.file = "data/ASV_16S.csv", 
+                              taxonomy.file = "data/Tax_16S.csv", 
+                              metadata.file = "data/Metadata_16S.csv")
+data_16S <- subset_samples(data_16S, is.na(burn) == F)
+
+#remove plant DNA
+data_16S <- subset_taxa(data_16S, Kingdom == "D_0__Bacteria" | Kingdom == "D_0__Archaea")
+data_16S <- subset_taxa(data_16S, Order != "D_3__Chloroplast")
+data_16S <- subset_taxa(data_16S, Family != "D_4__Mitochondria")
+
+#remove samples with low sequence depths
+data_16S_2000 <- prune_samples(sample_sums(data_16S)>=2000, data_16S)
+
+#remove blanks and extra sample
+data_16S <- subset_samples(data_16S_2000, sample.id != "B08-fine-16s-2" & 
+                                          sample.id != "BLANK-leaves-16S" & 
+                                          sample.id != "blank-root-16S-D4")
+
+#create counts and proportionally normalized datasets
+data_16S_counts <- data_16S
+data_16S <- transform_sample_counts(data_16S, function(x) x/sum(x))
+
+# ITS -----------------------------------------------------------------
+data_ITS <- read_csv2phyloseq(otu.file = "data/ASV_ITS.csv", 
+                              taxonomy.file = "data/Tax_ITS.csv", 
+                              metadata.file = "data/Metadata_ITS.csv")
+
+#remove plant DNA
+data_ITS <- subset_taxa(data_ITS, Kingdom == "k__Fungi")
+data_ITS <- subset_samples(data_ITS, is.na(burn) == F)
+
+#remove samples with low sequence depths, blanks, and extra samples
+data_ITS_1000 <- prune_samples(sample_sums(data_ITS)>=1000, data_ITS)
+data_ITS_1000 <- subset_samples(data_ITS_1000, sample.id != "U08-stem-ITS" & sample.id != "blank-root-ITS-1")
+
+#create counts and proportionally normalized datasets
+data_ITS_counts <- data_ITS_1000
+data_ITS <- transform_sample_counts(data_ITS_1000, function(x) x/sum(x))
+```
+
+# Rarefaction Curves
+```{r}
+# Funciton --------------
+calculate_rarefaction_curves <- function(psdata, measures, depths, parallel=T) {
+  require('plyr') # ldply
+  require('reshape2') # melt
+  require('doParallel')
+
+  # set parallel options if required
+  if (parallel) {
+    paropts  <- list(.packages=c("phyloseq", "reshape2"))
+  } else {
+    paropts  <- NULL
+  }
+
+  estimate_rarified_richness <- function(psdata, measures, depth) {
+    if(max(sample_sums(psdata)) < depth) return()
+    psdata <- prune_samples(sample_sums(psdata) >= depth, psdata)
+
+    rarified_psdata <- rarefy_even_depth(psdata, depth, verbose = FALSE)
+
+    alpha_diversity <- estimate_richness(rarified_psdata, measures = measures)
+
+    # as.matrix forces the use of melt.array, which includes the Sample names (rownames)
+    molten_alpha_diversity <- melt(as.matrix(alpha_diversity), varnames = c('Sample', 'Measure'), value.name = 'Alpha_diversity')
+
+    molten_alpha_diversity
+  }
+
+  names(depths) <- depths # this enables automatic addition of the Depth to the output by ldply
+  rarefaction_curve_data <- ldply(depths, estimate_rarified_richness, 
+                                  psdata = psdata, measures = measures, 
+                                  .id = 'Depth', .progress = ifelse(interactive() && ! parallel, 'text', 'none'), 
+                                  .parallel=parallel, .paropts=paropts)
+
+  # convert Depth from factor to numeric
+  rarefaction_curve_data$Depth <- as.numeric(levels(rarefaction_curve_data$Depth))[rarefaction_curve_data$Depth]
+
+  rarefaction_curve_data
+}
+
+# 16S ----------------------------------------------
+detectCores(all.tests=TRUE)
+
+cl <- makeCluster(detectCores(all.tests=TRUE),setup_strategy = "sequential")
+registerDoParallel(cl)
+
+rarefaction_curve_data <- calculate_rarefaction_curves(data_16S_counts, c('Observed', 'Shannon'), 
+                                                       rep(c(1, 10, 100, 1000, 2000, 5000, 1:100 * 10000), each = 10))
+
+rarefaction_curve_data_summary <- ddply(rarefaction_curve_data, c('Depth', 'Sample', 'Measure'), summarise, 
+                                        Alpha_diversity_mean = mean(Alpha_diversity), Alpha_diversity_sd = sd(Alpha_diversity))
+
+rarefaction_curve_data_summary_verbose <- merge(rarefaction_curve_data_summary %>% mutate(Sample = gsub("[.]", "-", Sample)), 
+                                                data.frame(sample_data(data_16S_counts)), 
+                                                by.x = 'Sample', by.y = 'row.names')
+
+p <- ggplot(rarefaction_curve_data_summary_verbose %>% filter(Measure == "Observed"), 
+       aes(x = Depth, y = Alpha_diversity_mean,  ymin = Alpha_diversity_mean - Alpha_diversity_sd, 
+           ymax = Alpha_diversity_mean + Alpha_diversity_sd, colour = burn_severity, group = Sample)) + 
+  geom_line() + 
+  geom_point() + 
+  scale_color_manual(name = "Burn Severity", values = c("grey", "orange", "#BF2F38")) +
+  scale_x_continuous(trans = "log10", name = "Sequence Depth") +
+  ylab("Richness") +
+  facet_wrap(~sample_type, scales = 'free') +
+  geom_vline(xintercept = 2000, linetype = "dashed") +
+  coord_cartesian(xlim = c(1, 100000)) +
+  theme(legend.title = element_text(size = 12))
+
+# ITS ----------------------
+
+detectCores(all.tests=TRUE)
+
+cl <- makeCluster(detectCores(all.tests=TRUE), setup_strategy = "sequential")
+registerDoParallel(cl)
+
+rarefaction_curve_data <- calculate_rarefaction_curves(data_ITS_counts, c('Observed', 'Shannon'), 
+                                                       rep(c(1, 10, 100, 1000, 2000, 5000, 1:100 * 10000), each = 10))
+
+rarefaction_curve_data_summary <- ddply(rarefaction_curve_data, c('Depth', 'Sample', 'Measure'), summarise, 
+                                        Alpha_diversity_mean = mean(Alpha_diversity), Alpha_diversity_sd = sd(Alpha_diversity))
+
+rarefaction_curve_data_summary_verbose <- merge(rarefaction_curve_data_summary %>% mutate(Sample = gsub("[.]", "-", Sample)), 
+                                                data.frame(sample_data(data_ITS_counts)), 
+                                                by.x = 'Sample', by.y = 'row.names')
+
+
+p2 <- ggplot(rarefaction_curve_data_summary_verbose %>% filter(Measure == "Observed"), 
+       aes(x = Depth, y = Alpha_diversity_mean,  ymin = Alpha_diversity_mean - Alpha_diversity_sd, 
+           ymax = Alpha_diversity_mean + Alpha_diversity_sd, colour = burn_severity, group = Sample)) + 
+  geom_line() + 
+  geom_point() + 
+  scale_color_manual(name = "Burn Severity", values = c("grey", "orange", "#BF2F38")) +
+  scale_x_continuous(trans = "log10", name = "Sequence Depth") +
+  ylab("Richness") +
+  facet_wrap(~sample_type, scales = 'free') +
+  geom_vline(xintercept = 1000, linetype = "dashed") +
+  coord_cartesian(xlim = c(1, 100000)) +
+  theme(legend.title = element_text(size = 12))
+
+# combine plots -----------------------------
+prow <- plot_grid(p + theme(legend.position = "none"), p2 + theme(legend.position = "none"), ncol = 1, labels = "AUTO", align = "vh")
+leg <- get_legend(p + theme(legend.justification = 1))
+prow <- plot_grid(prow, leg, ncol = 2, rel_widths = c(1, 0.2))
+
+tiff("Fig_S1.tiff", res = 100, height = 7, width = 6.5, units = "in")
+prow
+dev.off()
+```
+
+# Alpha diversity (Figure 1)
+```{r}
+# 16S ---------------------------------------------------------
+set.seed(01221990)
+rare_16S <- rarefy_even_depth(data_16S_counts, sample.size = 2000)
+
+OTU_16S <- t(as(rare_16S@otu_table, "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+
+rich_16S <- hill_taxa(OTU_16S, q = 0)
+rich_16S <- merge(data_16S_counts@sam_data, rich_16S, by = 0)
+shan_16S <- hill_taxa(OTU_16S, q = 1)
+shan_16S <- merge(data_16S_counts@sam_data, shan_16S, by = 0)
+invSimp_16S <- hill_taxa(OTU_16S, q = 2)
+invSimp_16S <- merge(data_16S_counts@sam_data, invSimp_16S, by = 0)
+
+letters <- c("a", "b", "c", "d", "e", "f", "g", "h")
+
+
+## Overall models
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = rich_16S, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = shan_16S, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = invSimp_16S, method="REML")
+plot(model) 
+shapiro.test(resid(model))
+anova.lme(model, type="sequential", adjustSigma = T)
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+
+## Just unburned samples
+model <- lme(y ~ sample_type, random=~1|plot, data = rich_16S %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model) 
+shapiro.test(resid(model)) # doesn't pass, but the resid vs. fitted looks good
+anova.lme(model, type="sequential", adjustSigma = T) # 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+model <- lme(y ~ sample_type, random=~1|plot, data = shan_16S %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model) # looks good
+shapiro.test(resid(model)) # doesn't pass, but the resid vs. fitted looks good
+anova.lme(model, type="sequential", adjustSigma = T) # 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+model <- lme(y ~ sample_type, random=~1|plot, data = invSimp_16S %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model) # looks good
+shapiro.test(resid(model)) # doesn't pass, but the resid vs. fitted looks good
+anova.lme(model, type="sequential", adjustSigma = T) # 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+
+# Break up analyses by sample type (niche/habitat)
+for(i in levels(as.factor(rich_16S$sample_type))){
+  x <- aov(y ~ burn_severity, data = rich_16S %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+for(i in levels(as.factor(shan_16S$sample_type))){
+  x <- aov(y ~ burn_severity, data = shan_16S %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+for(i in levels(as.factor(invSimp_16S$sample_type))){
+  x <- aov(y ~ burn_severity, data = invSimp_16S %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+
+# ITS -------------------------------------------------------
+set.seed(01221990)
+rare_ITS <- rarefy_even_depth(data_ITS_counts, sample.size = 1000)
+
+OTU_ITS <- t(as(rare_ITS@otu_table, "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+
+rich_ITS <- hill_taxa(OTU_ITS, q = 0)
+rich_ITS <- merge(data_ITS_counts@sam_data, rich_ITS, by = 0)
+shan_ITS <- hill_taxa(OTU_ITS, q = 1)
+shan_ITS <- merge(data_ITS_counts@sam_data, shan_ITS, by = 0)
+invSimp_ITS <- hill_taxa(OTU_ITS, q = 2)
+invSimp_ITS <- merge(data_ITS_counts@sam_data, invSimp_ITS, by = 0)
+
+
+# Overall models
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = rich_ITS, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = shan_ITS, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+model <- lme(y ~ sample_type*burn_severity, random=~1|plot, data = invSimp_ITS, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type:burn_severity")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+
+# Only unburned samples
+model <- lme(y ~ sample_type, random=~1|plot, data = rich_ITS %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+model <- lme(y ~ sample_type, random=~1|plot, data = shan_ITS %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+model <- lme(y ~ sample_type, random=~1|plot, data = invSimp_ITS %>% filter(burn_severity == "Unburned"), method="REML")
+plot(model)
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T)  
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+contrast(marginal, alpha = 0.05, method = "pairwise", adjust = "Tukey") 
+
+# Break up analyses by sample type (niche/habitat)
+for(i in levels(as.factor(rich_ITS$sample_type))){
+  x <- aov(y ~ burn_severity, data = rich_ITS %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+for(i in levels(as.factor(shan_ITS$sample_type))){
+  x <- aov(y ~ burn_severity, data = shan_ITS %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+for(i in levels(as.factor(invSimp_ITS$sample_type))){
+  x <- aov(y ~ burn_severity, data = invSimp_ITS %>% filter(sample_type %in% i))
+  print(i)
+  print(summary(x)[[1]][[1,"Pr(>F)"]])
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+
+# Plots -----------------------------------------------
+rich_16S$Amplicon <- "16S"
+rich_ITS$Amplicon <- "ITS"
+rich <- rbind(rich_16S %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon),
+              rich_ITS %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon))
+
+letters <- data.frame(x =        c(0.7, 1, 1.3, # Letters for Tukeys on plot
+                                   2.7, 3, 3.3,
+                                   3.7, 4, 4.3,
+                                   4.7, 5, 5.3,
+                                   5.7, 6, 6.3),
+                      y =        c(320, 220, 220,
+                                   40, 45, 50,
+                                   45, 40, 30,
+                                   170, 155, 145,
+                                   170, 120, 120),
+                      Amplicon = c("16S", "16S", "16S", 
+                                   "ITS", "ITS", "ITS", 
+                                   "ITS", "ITS", "ITS", 
+                                   "ITS", "ITS", "ITS", 
+                                   "ITS", "ITS", "ITS"),
+                      letter =   c("b", "a", "a",
+                                   "a", "ab", "b",
+                                   "b", "ab", "a",
+                                   "b", "ab", "a",
+                                   "b", "a", "a"))
+
+
+rich %>%
+  group_by(sample_type, burn_severity, Amplicon) %>%
+  summarise(mean = mean(y), se = sd(y)/sqrt(n())) %>%
+  ggplot(aes(x = sample_type, y = mean, fill = burn_severity)) +
+    geom_bar(stat = "identity", position = position_dodge(0.9)) +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), position = position_dodge(0.9), width = 0.2) +
+    geom_text(data = letters, aes(x = x, y = y, label = letter, vjust = 1), inherit.aes = F) +
+    facet_grid(rows = vars(Amplicon), 
+               labeller = labeller(Amplicon = c("16S" = "Archaea &\nBacteria", "ITS" = "Fungi")),
+               scales = "free") +
+    scale_y_continuous(name = bquote(~phantom()^0*italic(D)*" (Richness)")) +
+    scale_fill_manual(name = "Burn Severity", values = c("grey", "orange", "#BF2F38")) +
+    panel_border() +
+    theme(strip.text.y = element_text(size = 12), legend.text = element_text(hjust = 0),
+          legend.title = element_text(size = 12, face = "bold"), axis.title.x = element_blank(),
+          legend.position = c(0.08, 0.88), legend.background = element_rect(fill = "white")) +
+    geom_vline(xintercept = c(1.5, 2.5, 3.5, 4.5, 5.5), linetype = "dotted") -> p
+
+png("Fig_1.png", res = 300, height = 4.5, width = 6.5, units = "in")
+p
+dev.off()
+
+shan_16S$Amplicon <- "16S"
+shan_ITS$Amplicon <- "ITS"
+shan <- rbind(shan_16S %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon),
+              shan_ITS %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon))
+
+letters <- data.frame(x =        c(0.7, 1, 1.3),
+                      y =        c(25, 37, 29),
+                      Amplicon = c("ITS", "ITS", "ITS"),
+                      letter =   c("a", "b", "ab"))
+
+shan %>%
+  group_by(sample_type, burn_severity, Amplicon) %>%
+  summarise(mean = mean(y), se = sd(y)/sqrt(n())) %>%
+  ggplot(aes(x = sample_type, y = mean, fill = burn_severity)) +
+    geom_bar(stat = "identity", position = position_dodge(0.9)) +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), position = position_dodge(0.9), width = 0.2) +
+    geom_text(data = letters, aes(x = x, y = y, label = letter, vjust = 1), inherit.aes = F) +
+    facet_grid(rows = vars(Amplicon), 
+               labeller = labeller(Amplicon = c("16S" = "Archaea &\nBacteria", "ITS" = "Fungi")),
+               scales = "free") +
+    scale_y_continuous(name = bquote(~phantom()^1*italic(D))) +
+    scale_fill_manual(values = c("grey", "orange", "#BF2F38")) +
+    panel_border() +
+    theme(strip.text.y = element_text(size = 12), legend.text = element_text(hjust = 0),
+          legend.title = element_blank(), axis.title.x = element_blank()) +
+    geom_vline(xintercept = c(1.5, 2.5, 3.5, 4.5, 5.5), linetype = "dotted") -> p_shan
+
+invSimp_16S$Amplicon <- "16S"
+invSimp_ITS$Amplicon <- "ITS"
+invSimp <- rbind(invSimp_16S %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon),
+                 invSimp_ITS %>% dplyr::select(sample_type, y, burn, burn_severity, Amplicon))
+
+letters <- data.frame(x =        c(0.7, 1, 1.3),
+                      y =        c(10, 22, 15),
+                      Amplicon = c("ITS", "ITS", "ITS"),
+                      letter =   c("a", "b", "ab"))
+
+invSimp %>%
+  group_by(sample_type, burn_severity, Amplicon) %>%
+  summarise(mean = mean(y), se = sd(y)/sqrt(n())) %>%
+  ggplot(aes(x = sample_type, y = mean, fill = burn_severity)) +
+    geom_bar(stat = "identity", position = position_dodge(0.9)) +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), position = position_dodge(0.9), width = 0.2) +
+    geom_text(data = letters, aes(x = x, y = y, label = letter, vjust = 1), inherit.aes = F) +
+    facet_grid(rows = vars(Amplicon), 
+               labeller = labeller(Amplicon = c("16S" = "Archaea &\nBacteria", "ITS" = "Fungi")),
+               scales = "free") +
+    scale_y_continuous(name = bquote(~phantom()^2*italic(D))) +
+    scale_fill_manual(values = c("grey", "orange", "#BF2F38")) +
+    panel_border() +
+    theme(strip.text.y = element_text(size = 12), legend.text = element_text(hjust = 0),
+          legend.title = element_blank(), axis.title.x = element_blank()) +
+    geom_vline(xintercept = c(1.5, 2.5, 3.5, 4.5, 5.5), linetype = "dotted") -> p_invSimp
+
+leg <- get_legend(p_invSimp + theme(legend.position = "right"))
+prow <- plot_grid(p_shan + theme(legend.position = "none"), p_invSimp + theme(legend.position = "none"),
+                  ncol = 1, labels = "AUTO", align = "vh")
+prow2 <- plot_grid(prow, leg, ncol = 2, rel_widths = c(1, 0.2))
+
+png("Fig_S3.png", res = 300, height = 6, width = 6.5, units = "in")
+prow2
+dev.off()
+```
+
+# Full model Permanova (Figure S1)
+```{r}
+# 16S ---------------------------------------------
+df_16S <- data.frame(sample_data(data_16S))
+set.seed(12290)
+OTU_16S <- t(as(data_16S@otu_table, "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+
+x <- betadisper(dist_16S, group = interaction(df_16S$sample_type, df_16S$burn_severity))
+anova(x)
+
+set.seed(01221990)
+mod <- adonis(dist_16S ~ sample_type*burn_severity, data = df_16S, permutations = 9999)
+
+
+# ITS ---------------------------------------------
+df_ITS <- data.frame(sample_data(data_ITS))
+set.seed(12290)
+OTU_ITS <- t(as(data_ITS@otu_table, "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+
+x <- betadisper(dist_ITS, group = interaction(df_ITS$sample_type, df_ITS$burn_severity))
+anova(x)
+
+set.seed(01221990)
+mod <- adonis(dist_ITS ~ sample_type*burn_severity, data = df_ITS, permutations = 9999)
+
+
+# Plot -----------------------------------------------------
+
+ordu <- ordinate(data_16S, "PCoA", "bray", weighted = T)
+p <- plot_ordination(data_16S, ordu)
+fig.S4A <- ggplot(p$data, p$mapping) +
+    geom_point(aes(color = burn_severity, shape = sample_type), size = 4, alpha = 0.5) +
+    #scale_color_manual(values = c("grey", "#BF2F38")) +
+    scale_color_manual(values = c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("PCoA 1 (", round(100*as.data.frame(ordu$values)[1,2], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("PCoA 2 (", round(100*as.data.frame(ordu$values)[2,2], 1)), "%)")) +
+    theme(axis.title = element_text(size = 12), axis.text = element_text(size = 10),
+          legend.text = element_text(hjust = 0), title = element_text(size = 12),
+          legend.title = element_text(size = 12, face = "bold"), legend.position = "right") +
+    guides(color = guide_legend(override.aes = list(pch = 16, alpha = 1), title = "Burn\nseverity"),
+           shape = guide_legend(title = "Plant-associated\nhabitat"))
+
+ordu <- ordinate(data_ITS, "PCoA", "bray", weighted = T)
+p <- plot_ordination(data_ITS, ordu)
+fig.S4B <- ggplot(p$data, p$mapping) +
+    geom_point(aes(color = burn_severity, shape = sample_type), size = 4, alpha = 0.5) +
+    #scale_color_manual(values = c("grey", "#BF2F38")) +
+    scale_color_manual(values = c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("PCoA 1 (", round(100*as.data.frame(ordu$values)[1,2], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("PCoA 2 (", round(100*as.data.frame(ordu$values)[2,2], 1)), "%)")) +
+    theme(axis.title = element_text(size = 12), axis.text = element_text(size = 10),
+          legend.text = element_text(hjust = 0), title = element_text(size = 12),
+          legend.title = element_text(size = 12, face = "bold"), legend.position = "right") +
+    guides(color = guide_legend(override.aes = list(pch = 16, alpha = 1), title = "Burn\nseverity"),
+           shape = guide_legend(title = "Plant-associated\nhabitat"))
+
+leg <- get_legend(fig.S4A + theme(legend.position = "right"))
+prow <- plot_grid(fig.S4A + theme(legend.position = "none"), fig.S4B + theme(legend.position = "none"), 
+                  ncol = 1, labels = "AUTO", align = "vh")
+Fig.S4 <- plot_grid(prow, leg, ncol = 2, rel_widths = c(1, 0.3))
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_S4.png", res = 300, height = 6, width = 6, units = "in")
+Fig.S4
+dev.off()
+```
+
+# Permanova broken up by niche (Fig 2 and 3)
+```{r}
+# 16S --------------------------------------------------
+
+# check betadisper 
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- subset_samples(data_16S, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  x <- betadisper(dist, group = samp$burn_severity)
+  print(i)
+  print(p.adjust(anova(x)[1,5], "fdr", n = 6))
+}
+
+#Build empty table
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("name", "R^2", "p-val")
+x <- data.frame(matrix(ncol = 3))
+colnames(x) <- c("name", "R^2", "p-val")
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- subset_samples(data_16S, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  set.seed(12290)
+  ad <- adonis(dist ~ burn_severity, data = samp, permutations = 9999) 
+  x$name <- i 
+  x$`p-val` <- p.adjust(ad$aov.tab[1,6], method = "fdr", n = 6)
+  x$`R^2` <- ad$aov.tab[1,5]
+  tab <- rbind(tab, x) 
+}
+
+# Mulitple comparisons
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- subset_samples(data_16S, sample_type %in% i) 
+  cbn <- combn(x = levels(as.factor(sub@sam_data$burn_severity)), m = 2)
+  
+  for(j in 1:ncol(cbn)){
+    subs <- subset_samples(data_16S, burn_severity %in% cbn[,j])
+    samp <- data.frame(sample_data(subs))
+    dist <- phyloseq::distance(subs, "bray")
+    set.seed(12290)
+    ad <- adonis(dist ~ burn_severity, data = samp, permutations = 9999) # perms give enough sig figs for bonferoni corection
+    print(i)
+    print(cbn[,j])
+    print(ad)
+    print("FDR-adjusted p-value")
+    print(p.adjust(ad$aov.tab[1,5], method = "fdr", n = 12))
+  }
+}
+
+#Analyze just burn vs. unburn (not caring about severity)
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("name", "R^2", "p-val")
+x <- data.frame(matrix(ncol = 3))
+colnames(x) <- c("name", "R^2", "p-val")
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- subset_samples(data_16S, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  set.seed(12290)
+  ad <- adonis(dist ~ burn, data = samp, permutations = 9999) 
+  x$name <- i 
+  x$`p-val` <- p.adjust(ad$aov.tab[1,6], method = "fdr", n = 6)
+  x$`R^2` <- ad$aov.tab[1,5]
+  tab <- rbind(tab, x) 
+}
+
+
+# ITS --------------------------------------------------
+
+# check betdisper
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- subset_samples(data_ITS, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  x <- betadisper(dist, group = samp$burn_severity)
+  print(i)
+  print(p.adjust(anova(x)[1,5], "fdr", n = 6))
+}
+
+#Build empty table
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("name", "R^2", "p-val")
+x <- data.frame(matrix(ncol = 3))
+colnames(x) <- c("name", "R^2", "p-val")
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- subset_samples(data_ITS, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  set.seed(12290)
+  ad <- adonis(dist ~ burn_severity, data = samp, permutations = 9999) 
+  x$name <- i 
+  x$`p-val` <- p.adjust(ad$aov.tab[1,6], method = "fdr", n = 6)
+  x$`R^2` <- ad$aov.tab[1,5]
+  tab <- rbind(tab, x) 
+}
+
+# multiple comparisons
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- subset_samples(data_ITS, sample_type %in% i) 
+  cbn <- combn(x = levels(as.factor(sub@sam_data$burn_severity)), m = 2)
+  
+  for(j in 1:ncol(cbn)){
+    subs <- subset_samples(data_ITS, burn_severity %in% cbn[,j])
+    samp <- data.frame(sample_data(subs))
+    dist <- phyloseq::distance(subs, "bray")
+    set.seed(12290)
+    ad <- adonis(dist ~ burn_severity, data = samp, permutations = 9999) 
+    print(i)
+    print(cbn[,j])
+    print(ad)
+    print("FDR-adjusted p-value")
+    print(p.adjust(ad$aov.tab[1,6], method = "fdr", n = ncol(cbn)))
+  }
+}
+
+#Analyze just burn vs. unburn (not caring about severity)
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("name", "R^2", "p-val")
+x <- data.frame(matrix(ncol = 3))
+colnames(x) <- c("name", "R^2", "p-val")
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- subset_samples(data_ITS, sample_type %in% i) 
+  samp <- data.frame(sub@sam_data) 
+  dist <- phyloseq::distance(sub, "bray") 
+  set.seed(12290)
+  ad <- adonis(dist ~ burn, data = samp, permutations = 9999) 
+  x$name <- i 
+  x$`p-val` <- p.adjust(ad$aov.tab[1,6], method = "fdr", n = 6)
+  x$`R^2` <- ad$aov.tab[1,5]
+  tab <- rbind(tab, x) 
+}
+
+
+# Plot --------------------------------------------------------------------
+## 16S -------------------------------------------------
+myplots <- list()
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- subset_samples(data_16S, sample_type %in% i)
+  ordu <- ordinate(sub, "PCoA", "bray", weighted = T)
+  p <- plot_ordination(sub, ordu)
+  p2 <- ggplot(p$data, p$mapping) +
+    geom_point(aes(fill = burn_severity), size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values = c("grey", "orange", "#BF2F38")) +
+    ggtitle(i) +
+    scale_x_continuous(name = paste0(paste0("PCoA 1 (", round(100*as.data.frame(ordu$values)[1,2], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("PCoA 2 (", round(100*as.data.frame(ordu$values)[2,2], 1)), "%)")) +
+    theme(legend.text = element_text(size = 12), title = element_text(size = 12),
+          legend.title = element_text(size = 12, face = "bold")) +
+    guides(fill = guide_legend(override.aes = list(size = 4, alpha = 1), title = "Burn Severity")) 
+  myplots[[i]] <- p2 + theme(legend.position = "none")
+}
+
+#Add astrisks to sig. PerMANOVAs (p < 0.05)
+myplots[[1]] <- myplots[[1]] + ggtitle("Leaf*")
+myplots[[4]] <- myplots[[4]] + ggtitle("Rhizome*")
+myplots[[5]] <- myplots[[5]] + ggtitle("Rhizosphere*")
+myplots[[6]] <- myplots[[6]] + ggtitle("Bulk soil*")
+
+leg <- get_legend(p2 + theme(legend.position = "bottom", legend.justification = "center"))
+grid <- plot_grid(plotlist = myplots, align = "vh", ncol = 3)
+fig.2 <- plot_grid(grid, leg, ncol = 1, rel_heights = c(1, 0.08))
+
+png("Fig_2.png", res = 300, height = 4.5, width = 6.5, units = "in")
+fig.2
+dev.off()
+
+## ITS ----------------------------------------------------
+myplots <- list()
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- subset_samples(data_ITS, sample_type %in% i)
+  ordu <- ordinate(sub, "PCoA", "bray", weighted = T)
+  p <- plot_ordination(sub, ordu)
+  p2 <- ggplot(p$data, p$mapping) +
+    geom_point(aes(fill = burn_severity), size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values = c("grey", "orange", "#BF2F38")) +
+    ggtitle(i) +
+    scale_x_continuous(name = paste0(paste0("PCoA 1 (", round(100*as.data.frame(ordu$values)[1,2], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("PCoA 2 (", round(100*as.data.frame(ordu$values)[2,2], 1)), "%)")) +
+    theme(legend.text = element_text(size = 12), title = element_text(size = 12),
+          legend.title = element_text(size = 12, face = "bold")) +
+    guides(fill = guide_legend(override.aes = list(size = 4, alpha = 1), title = "Burn Severity")) 
+  myplots[[i]] <- p2 + theme(legend.position = "none")
+}
+
+#Add astrisks to sig. PerMANOVAs (p < 0.05)
+myplots[[1]] <- myplots[[1]] + ggtitle("Leaf*")
+myplots[[5]] <- myplots[[5]] + ggtitle("Rhizosphere*")
+myplots[[6]] <- myplots[[6]] + ggtitle("Bulk soil*")
+
+leg <- get_legend(p2 + theme(legend.position = "bottom", legend.justification = "center"))
+grid <- plot_grid(plotlist = myplots, align = "vh", ncol = 3)
+fig.3 <- plot_grid(grid, leg, ncol = 1, rel_heights = c(1, 0.08))
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_3.png", res = 300, height = 4.5, width = 6.5, units = "in")
+fig.3
+dev.off()
+```
+
+# 16S Taxonomy (Fig S5 through S8)
+```{r}
+# Major Taxa -------------------------------------------
+#Seperate Proteos, assign grouping by Class, glom, and melt
+proteos <- subset_taxa(data_16S, Class == "D_2__Alphaproteobacteria" |
+                                 Class == "D_2__Deltaproteobacteria" |
+                                 Class == "D_2__Gammaproteobacteria")
+colnames(tax_table(proteos))[1] <- "group"
+tax_table(proteos)[,"group"] <- tax_table(proteos)[,"Class"]
+proteos_glom <- tax_glom(proteos, taxrank = "group")
+proteos_melt <- psmelt(proteos_glom)
+
+#Do same for Archaea
+
+archaea <- subset_taxa(data_16S, Kingdom == "D_0__Archaea")
+colnames(tax_table(archaea))[1] <- "group"
+archaea_glom <- tax_glom(archaea, taxrank = "group")
+archaea_melt <- psmelt(archaea_glom)
+
+#Get the rest of the abundant phyla, assign grouping by phylum, glom, and melt
+abundant_non_proteos <- subset_taxa(data_16S, Phylum == "D_1__Verrucomicrobia" |
+                                              Phylum == "D_1__Chloroflexi"|
+                                              Phylum == "D_1__Planctomycetes"|
+                                              Phylum == "D_1__Firmicutes" |
+                                              Phylum == "D_1__Gemmatimonadetes" |
+                                              Phylum == "D_1__Bacteroidetes" |
+                                              Phylum == "D_1__Acidobacteria" |
+                                              Phylum == "D_1__Actinobacteria")
+colnames(tax_table(abundant_non_proteos))[1] <- "group"
+tax_table(abundant_non_proteos)[,"group"] <- tax_table(abundant_non_proteos)[,"Phylum"]
+abundant_non_proteos_glom <- tax_glom(abundant_non_proteos, taxrank = "group")
+abundant_non_proteos_melt <- psmelt(abundant_non_proteos_glom)
+
+#concatenate the datasets
+data_16S_grouping <- rbind(proteos_melt, abundant_non_proteos_melt, archaea_melt)
+
+sum2 <- data_16S_grouping %>% 
+  group_by(burn_severity, sample_type, group) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+sum2$group <- sapply(strsplit(as.character(sum2$group), "__"), `[`, 2)
+
+rare <- sum2 %>%
+  group_by(burn_severity, sample_type) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(group = "Rare Taxa")
+
+sum2 = rbind(sum2, rare)
+
+sum2$group <- ordered(sum2$group, c("Archaea", "Alphaproteobacteria", "Deltaproteobacteria", 
+                                    "Gammaproteobacteria", "Acidobacteria",
+                                    "Actinobacteria", "Bacteroidetes", "Chloroflexi",
+                                    "Firmicutes", "Gemmatimonadetes", "Planctomycetes", "Verrucomicrobia",
+                                    "Rare Taxa"))
+
+fig.S5 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = group)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e", "#0e334d","#1f77b4", "#abd2ed", "yellow",
+                                 "#8c564b", "#d62728", "#9467bd", "#2ca02c", "#e377c2", 
+                                 "#7f7f7f", "#17becf", "white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_S5.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S5
+dev.off()
+
+# At the Order Level ----------------------------------------------
+
+order_sum_16S <- tapply(taxa_sums(data_16S), 
+                         tax_table(data_16S)[, "Order"], sum, na.rm=TRUE)
+top10order_16S <- names(sort(order_sum_16S, TRUE))[1:10]
+
+abundant_16S_order <- subset_taxa(data_16S, Order %in% top10order_16S)
+abundant_16S_order_glom <- tax_glom(abundant_16S_order, taxrank = "Order")
+abundant_16S_order_melt <- psmelt(abundant_16S_order_glom)
+
+sum2 <- abundant_16S_order_melt %>% 
+  group_by(sample_type, Order, sample_type, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Order <- sapply(strsplit(as.character(sum2$Order), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Order = "Other/Unidentified Order")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Order <- forcats::fct_relevel(sum2$Order, "Other/Unidentified Order", after = Inf)
+
+fig.S6 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Order)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e", "#0e334d","#1f77b4", "#abd2ed", "yellow",
+                                 "#8c564b", "#d62728", "#9467bd", "#2ca02c", "#e377c2", 
+                                 "#7f7f7f", "#17becf", "white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Figure_S6.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S6
+dev.off()
+
+# At the Family Level ----------------------------------------------
+family_sum_16S <- tapply(taxa_sums(data_16S), 
+                         tax_table(data_16S)[, "Family"], sum, na.rm=TRUE)
+top10family_16S <- names(sort(family_sum_16S, TRUE))[1:10]
+
+abundant_16S_family <- subset_taxa(data_16S, Family %in% top10family_16S)
+abundant_16S_family_glom <- tax_glom(abundant_16S_family, taxrank = "Family")
+abundant_16S_family_melt <- psmelt(abundant_16S_family_glom)
+
+sum2 <- abundant_16S_family_melt %>% 
+  group_by(sample_type, Family, sample_type, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Family <- sapply(strsplit(as.character(sum2$Family), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Family = "Other/Unidentified Family")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Family <- forcats::fct_relevel(sum2$Family, "Other/Unidentified Family", after = Inf)
+
+fig.S7 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Family)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e", "#0e334d","#1f77b4", "#abd2ed", "yellow",
+                                 "#8c564b", "#d62728", "#9467bd", "#2ca02c", "#e377c2", 
+                                 "#7f7f7f", "#17becf", "white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Figure_S7.png", res = 100, height = 7, width = 6.5, units = "in")
+fig.S7
+dev.off()
+
+# At the Genus Level ----------------------------------------------
+genus_sum_16S <- tapply(taxa_sums(data_16S), 
+                         tax_table(data_16S)[, "Genus"], sum, na.rm=TRUE)
+top10genus_16S <- names(sort(genus_sum_16S, TRUE))[1:13]
+
+abundant_16S_genus <- subset_taxa(data_16S, Genus %in% top10genus_16S)
+abundant_16S_genus_glom <- tax_glom(abundant_16S_genus, taxrank = "Genus")
+abundant_16S_genus_melt <- psmelt(abundant_16S_genus_glom)
+
+sum2 <- abundant_16S_genus_melt %>% 
+  filter(Genus != "D_5__uncultured" & Genus != "D_5__uncultured bacterium" & Genus != "D_5__metagenome") %>%
+  group_by(sample_type, Genus, sample_type, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Genus <- sapply(strsplit(as.character(sum2$Genus), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Genus = "Other/Unidentified Genus")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Genus <- forcats::fct_relevel(sum2$Genus, "Other/Unidentified Genus", after = Inf)
+sum2$Genus <- dplyr::recode(sum2$Genus, "RB41" = "Blastocatellaceae: 1RB41")
+
+fig.S6 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Genus)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e", "#0e334d","#1f77b4", "#abd2ed", "yellow",
+                                 "#8c564b", "#d62728", "#9467bd", "#2ca02c", "#e377c2", 
+                                 "#7f7f7f", "#17becf", "white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Figure_S8.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S8
+dev.off()
+```
+
+```{r}
+# ITS ----------------------------------------------------------
+abundant_taxa <- subset_taxa(data_ITS, Phylum == "p__Ascomycota" |
+                                       Phylum == "p__Basidiomycota"|
+                                       Phylum == "p__Mucoromycota"|
+                                       Phylum == "p__Mortierellomycota" |
+                                       Phylum == "p__Chytridiomycota" |
+                                       Phylum == "p__Rozellomycota" |
+                                       Phylum == "p__Entomophthoromycota" |
+                                       Phylum == "p__Glomeromycota")
+colnames(tax_table(abundant_taxa))[1] <- "group"
+tax_table(abundant_taxa)[,"group"] <- tax_table(abundant_taxa)[,"Phylum"]
+abundant_taxa_glom <- tax_glom(abundant_taxa, taxrank = "group")
+abundant_taxa_melt <- psmelt(abundant_taxa_glom)
+
+sum2 <- abundant_taxa_melt %>% 
+  group_by(burn_severity, sample_type, group) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+sum2$group <- sapply(strsplit(as.character(sum2$group), "__"), `[`, 2)
+
+rare <- sum2 %>%
+  group_by(burn_severity, sample_type) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(group = "Other/Unidentified")
+
+sum2 = rbind(sum2, rare)
+
+sum2$group <- ordered(sum2$group, c("Ascomycota", "Basidiomycota", "Chytridiomycota", 
+                                    "Entomophthoromycota", "Glomeromycota",
+                                    "Mortierellomycota", "Mucoromycota", "Rozellomycota",
+                                    "Other/Unidentified"))
+
+fig.S10 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = group)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#abd2ed", "#2ca02c", 
+                                 "#8c564b", "#d62728", "#9467bd", "yellow", "#e377c2", 
+                                 "#17becf", "#7f7f7f", "white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("Fig_S10.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S10
+dev.off()
+
+# Class --------------------------
+# At the Class level --------------------------------------
+abundant_ITS <- subset_taxa(data_ITS, Class == "c__Dothideomycetes" |
+                                      Class == "c__Agaricomycetes"|
+                                      Class == "c__Leotiomycetes"|
+                                      Class == "c__Eurotiomycetes"|
+                                      Class == "c__Sordariomycetes" |
+                                      Class == "c__Pezizomycetes" |
+                                      Class == "c__Tremellomycetes" |
+                                      Class == "c__Lecanoromycetes" |
+                                      Class == "c__Microbotryomycetes" |
+                                      Class == "c__unidentified")
+colnames(tax_table(abundant_ITS))[1] <- "group"
+tax_table(abundant_ITS)[,"group"] <- tax_table(abundant_ITS)[,"Class"]
+abundant_ITS_glom <- tax_glom(abundant_ITS, taxrank = "group")
+abundant_ITS_melt <- psmelt(abundant_ITS_glom)
+
+sum2 <- abundant_ITS_melt %>% 
+  group_by(burn_severity, sample_type, group) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+sum2$group <- sapply(strsplit(as.character(sum2$group), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(burn_severity, sample_type) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(group = "Rare Taxa")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+sum2$group <- dplyr::recode(sum2$group, unidentified = "Unidentified")
+
+sum2$group <- ordered(sum2$group, c("Agaricomycetes", "Dothideomycetes", "Eurotiomycetes",
+                                    "Lecanoromycetes", "Leotiomycetes", "Microbotryomycetes", 
+                                    "Pezizomycetes", "Sordariomycetes", "Tremellomycetes",
+                                    "Unidentified", "Rare Taxa"))
+
+fig.SClass <- ggplot(sum2, aes(x = burn_severity, y = means, fill = group)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e","#1f77b4", "yellow",  "#2ca02c", "#d62728", 
+                                 "#9467bd", "#8c564b", "#e377c2",  "#17becf", 
+                                 "#7f7f7f","white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+# Order -----------------------------
+order_sum_ITS <- tapply(taxa_sums(data_ITS), 
+                         tax_table(data_ITS)[, "Order"], sum, na.rm=TRUE)
+top10order_ITS <- names(sort(order_sum_ITS, TRUE))[1:11]
+
+abundant_ITS_order <- subset_taxa(data_ITS, Order %in% top10order_ITS)
+abundant_ITS_order_glom <- tax_glom(abundant_ITS_order, taxrank = "Order")
+abundant_ITS_order_melt <- psmelt(abundant_ITS_order_glom)
+
+sum2 <- abundant_ITS_order_melt %>% 
+  filter(Order != "o__unidentified") %>%
+  group_by(sample_type, Order, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Order <- sapply(strsplit(as.character(sum2$Order), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Order = "Other/Unidentified Order")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Order <- forcats::fct_relevel(sum2$Order, "Other/Unidentified Order", after = Inf)
+
+fig.SOrder <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Order)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e","#1f77b4", "yellow",  "#2ca02c", "#d62728", 
+                                 "#9467bd", "#8c564b", "#e377c2",  "#17becf", 
+                                 "#7f7f7f","white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+# Family ----------------------------------------------
+family_sum_ITS <- tapply(taxa_sums(data_ITS), 
+                         tax_table(data_ITS)[, "Family"], sum, na.rm=TRUE)
+top10family_ITS <- names(sort(family_sum_ITS, TRUE))[1:11]
+
+top10family_ITS <- c(top10family_ITS, "f__Teichosporaceae")
+
+abundant_ITS_family <- subset_taxa(data_ITS, Family %in% top10family_ITS)
+abundant_ITS_family_glom <- tax_glom(abundant_ITS_family, taxrank = "Family")
+abundant_ITS_family_melt <- psmelt(abundant_ITS_family_glom)
+
+sum2 <- abundant_ITS_family_melt %>% 
+  filter(Family != "f__unidentified" & Family != "f__Chaetothyriales_fam_Incertae_sedis") %>%
+  group_by(sample_type, Family, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Family <- sapply(strsplit(as.character(sum2$Family), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Family = "Other/Unidentified Family")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Family <- forcats::fct_relevel(sum2$Family, "Other/Unidentified Family", after = Inf)
+
+fig.S11 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Family)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e","#1f77b4", "yellow",  "#2ca02c", "#d62728", 
+                                 "#9467bd", "#8c564b", "#e377c2",  "#17becf", 
+                                 "#7f7f7f","white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_S11.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S11
+dev.off()
+
+# Genus -----------------------------------------------
+genus_sum_ITS <- tapply(taxa_sums(data_ITS), 
+                         tax_table(data_ITS)[, "Genus"], sum, na.rm=TRUE)
+top10genus_ITS <- names(sort(genus_sum_ITS, TRUE))[1:11]
+
+abundant_ITS_genus <- subset_taxa(data_ITS, Genus %in% top10genus_ITS)
+abundant_ITS_genus_glom <- tax_glom(abundant_ITS_genus, taxrank = "Genus")
+abundant_ITS_genus_melt <- psmelt(abundant_ITS_genus_glom)
+
+sum2 <- abundant_ITS_genus_melt %>% 
+  filter(Genus != "g__unidentified") %>%
+  group_by(sample_type, Genus, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+sum2$Genus <- sapply(strsplit(as.character(sum2$Genus), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(Genus = "Other/Unidentified Genus")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$Genus <- forcats::fct_relevel(sum2$Genus, "Other/Unidentified Genus", after = Inf)
+
+fig.S12 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = Genus)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e","#1f77b4", "yellow",  "#2ca02c", "#d62728", 
+                                 "#9467bd", "#8c564b", "#e377c2",  "#17becf", 
+                                 "#7f7f7f","white")) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center") +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_S12.png", res = 300, height = 7, width = 6.5, units = "in")
+fig.S12
+dev.off()
+```
+
+# RDAs w/ env variables
+```{r}
+# Soils ----------------------------------------------------------------------
+## Are soils different? ----------------------------------------------------
+key <- read_excel("data/Burn_sample_key.xlsx")
+soil_chem <- read_excel("data/Soil_chemistry.xlsx", skip = 8)
+soil_chem <- merge(key, soil_chem, by.x = "ID", by.y = "Sample")
+
+a <- aov(log(`pH 2`) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Bulk soil"))
+plot(a)
+shapiro.test(resid(a)) 
+summary(a) 
+TukeyHSD(a) 
+
+a <- aov(log(`pH 2`) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Rhizosphere"))
+plot(a)
+shapiro.test(resid(a))
+summary(a) 
+TukeyHSD(a) 
+
+a <- aov(log(`NH4-N`+ 1) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Bulk soil"))
+plot(a)
+shapiro.test(resid(a))
+summary(a) 
+TukeyHSD(a) 
+
+a <- aov(log(`NO3-N` + 1) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Bulk soil"))
+plot(a)
+shapiro.test(resid(a)) 
+summary(a) 
+TukeyHSD(a) 
+
+
+y.transf.betareg <- function(y){
+  n.obs <- sum(!is.na(y))
+  (y * (n.obs - 1) + 0.5) / n.obs
+}
+
+x <- betareg(y.transf.betareg(C/100) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Bulk soil"))
+joint_tests(x)  
+
+x <- betareg(y.transf.betareg(C/100) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Rhizosphere"))
+joint_tests(x) 
+
+x <- betareg(y.transf.betareg(N/100) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Bulk soil"))
+joint_tests(x) 
+
+x <- betareg(y.transf.betareg(N/100) ~ as.factor(`Burn Severity`), data = soil_chem %>% filter(sample_type == "Rhizosphere"))
+joint_tests(x)
+
+
+## RDAs----------------------------------------------------
+# 16S
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Bulk soil")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Bulk soil")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+set.seed(1221990)
+rda_16S_soil <- dbrda(dist_16S ~ pH.2 + C.x + N.x + NH4.N + NO3.N, df.16S)
+varpart(dist_16S, ~ pH.2 + C.x + N.x, data = df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_soil, permutations = 9999) 
+## Marginal or Type III effects
+set.seed(1221990)
+anova(rda_16S_soil, by="mar") 
+rda_16S_soil 
+
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Rhizosphere")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Rhizosphere")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+set.seed(1221990)
+rda_16S_rhizo <- dbrda(dist_16S ~ pH.2 + C.x + N.x, df.16S)
+varpart(dist_16S, ~ pH.2 + C.x + N.x, data = df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_rhizo, permutations = 9999) 
+## Marginal or Type III effects
+set.seed(1221990)
+anova(rda_16S_rhizo, by="mar") 
+rda_16S_rhizo 
+
+# ITS
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Bulk soil")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Bulk soil")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+set.seed(1221990)
+rda_ITS_soil <- dbrda(dist_ITS ~ pH.2 + C.x + N.x + NH4.N + NO3.N, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_soil, permutations = 9999) 
+## Marginal or Type III effects
+set.seed(1221990)
+anova(rda_ITS_soil, by="mar") 
+rda_ITS_soil 
+
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Rhizosphere")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Rhizosphere")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+set.seed(1221990)
+rda_ITS_rhizo <- dbrda(dist_ITS ~ pH.2 + C.x + N.x, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_rhizo, permutations = 9999) 
+## Marginal or Type III effects
+set.seed(1221990)
+anova(rda_ITS_rhizo, by="margin") 
+rda_ITS_rhizo 
+
+
+# Plant stuff --------------------------------------------------
+
+key <- read_excel("data/Burn_sample_key.xlsx")
+plant_chem <- read_excel("data/Plant_chem_w_C.xlsx", skip = 8)
+plant_chem <- merge(key, plant_chem, by.x = "ID", by.y = "Sample")
+
+tab <- data.frame(matrix(ncol = 8, nrow = 0))
+for(i in colnames(plant_chem[,7:13])){
+  for(j in levels(as.factor(plant_chem$sample_type))){
+    sub <- subset(plant_chem, sample_type %in% j)
+    x <- betareg(y.transf.betareg(get(i)/100) ~ as.factor(`Burn Severity`), data = sub)
+    tab <- rbind(tab, cbind(as.data.frame(joint_tests(x)), i, j))
+  }
+} 
+
+tab2 <- data.frame(matrix(ncol = 8, nrow = 0))
+for(i in colnames(plant_chem[,14:25])){
+  if(class(plant_chem[,i]) == "numeric"){
+    for(j in levels(as.factor(plant_chem$sample_type))){
+      sub <- subset(plant_chem, sample_type %in% j)
+      x <- betareg(y.transf.betareg(get(i)/100000) ~ as.factor(`Burn Severity`), data = sub)
+      tab2 <- rbind(tab2, cbind(as.data.frame(joint_tests(x)), i, j))
+    }
+  }
+} 
+
+results <- rbind(tab, tab2)
+results$sig[results$p.value < 0.05] <- T
+sigtab <- results %>% filter(p.value < 0.05)
+
+for(z in 1:nrow(sigtab)){
+  element <- sigtab[z,6]
+  niche <- sigtab[z, 7]
+  sub <- subset(plant_chem, sample_type %in% niche)
+  x <- betareg(y.transf.betareg(get(element)/100000) ~ as.factor(`Burn Severity`), data = sub)
+  marginal <- lsmeans(x, ~ as.factor(`Burn Severity`))
+  a <- cld(marginal, alpha = 0.05, Letters = "abcdef", adjust = "tukey")
+  print(niche)
+  print(element)
+  print(a)
+}
+
+x <- betareg(y.transf.betareg(Ca/100) ~ as.factor(`Burn Severity`), data = plant_chem %>% filter(sample_type == "Coarse"))
+marginal <- lsmeans(x, ~ as.factor(`Burn Severity`))
+a <- cld(marginal, alpha = 0.05, Letters = "abcdef", adjust = "tukey")
+
+## RDAs----------------------------------------------------
+# 16S
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Leaf")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Leaf")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S) 
+dist_16S <- vegdist(OTU_16S, "bray")
+df.16S <- df.16S %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_16S_leaf <- dbrda(dist_16S ~ B +  Ca + K + Mn + N.y + P, df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_leaf, permutations = 9999) 
+
+
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Stem")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Stem")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+df.16S <- df.16S %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_16S_stem <- dbrda(dist_16S ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_stem, permutations = 9999) 
+rda_16S_stem
+
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Rhizome")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Rhizome")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+df.16S <- df.16S %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_16S_rhizome <- dbrda(dist_16S ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_rhizome, permutations = 9999)
+rda_16S_rhizome
+
+df.16S <- data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Fine root")))
+OTU_16S <- t(as(otu_table(data_16S %>% subset_samples(sample_type == "Fine root")), "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray")
+df.16S <- df.16S %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_16S_fine <- dbrda(dist_16S ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.16S)
+## overall test
+set.seed(1221990)
+anova(rda_16S_fine, permutations = 9999) 
+
+
+# ITS
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Leaf")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Leaf")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS) 
+dist_ITS <- vegdist(OTU_ITS, "bray")
+df.ITS <- df.ITS %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_ITS_leaf <- dbrda(dist_ITS ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_leaf, permutations = 9999) 
+set.seed(1221990)
+anova(rda_ITS_leaf, by="mar") 
+rda_ITS_leaf 
+
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Stem")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Stem")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+df.ITS <- df.ITS %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_ITS_stem <- dbrda(dist_ITS ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_stem, permutations = 9999) 
+rda_ITS_stem
+
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Rhizome")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Rhizome")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+df.ITS <- df.ITS %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_ITS_rhizome <- dbrda(dist_ITS ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_rhizome, permutations = 9999) 
+rda_ITS_rhizome
+
+df.ITS <- data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Fine root")))
+OTU_ITS <- t(as(otu_table(data_ITS %>% subset_samples(sample_type == "Fine root")), "matrix"))
+OTU_ITS <- as.data.frame(OTU_ITS)
+dist_ITS <- vegdist(OTU_ITS, "bray")
+df.ITS <- df.ITS %>% mutate(B = B/10000, Fe = Fe/10000, Mn = Mn/10000, Zn = Zn/10000)
+set.seed(1221990)
+rda_ITS_fine <- dbrda(dist_ITS ~ B + C.y + Ca + Fe + K + Mg + Mn + N.y + P + S + Zn, df.ITS)
+## overall test
+set.seed(1221990)
+anova(rda_ITS_fine, permutations = 9999) 
+rda_ITS_fine
+
+# Plots ----------------------------------------------------
+plot.data <- merge(summary(rda_16S_soil)$sites, 
+                   data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Bulk soil"))), 
+                   by = "row.names") 
+ggplot() +
+    geom_point(data = plot.data, aes(x = dbRDA1, y = dbRDA2, fill = burn_severity), 
+               size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("dbRDA 1 (", round(100*as.data.frame(summary(rda_16S_soil)$cont)[2,1], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("dbRDA 2 (", round(100*as.data.frame(summary(rda_16S_soil)$cont)[2,2], 1)), "%)")) +
+    geom_segment(data = as.data.frame(summary(rda_16S_soil)$biplot), aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+                 size = 0.25, color = "black", arrow = arrow(length = unit(0.2, "cm"))) +
+    geom_text_repel(data = as.data.frame(summary(rda_16S_soil)$biplot) %>% 
+                      rownames_to_column() %>%
+                      mutate(rowname = dplyr::recode(rowname, C.x = "C", N.x = "N", pH.2 = "pH", CN = "C:N", NO3.N = "NO3", NH4.N = "NH4")), 
+                    aes(x = dbRDA1, y = dbRDA2, label = rowname), 
+                    size = 4) -> p_16S_soil
+
+plot.data <- merge(summary(rda_ITS_soil)$sites, data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Bulk soil"))), by = "row.names") 
+
+ggplot() +
+    geom_point(data = plot.data, aes(x = dbRDA1, y = dbRDA2, fill = burn_severity), 
+               size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("dbRDA 1 (", round(100*as.data.frame(summary(rda_ITS_soil)$cont)[2,1], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("dbRDA 2 (", round(100*as.data.frame(summary(rda_ITS_soil)$cont)[2,2], 1)), "%)")) +
+    geom_segment(data = as.data.frame(summary(rda_ITS_soil)$biplot), aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+                 size = 0.25, color = "black", arrow = arrow(length = unit(0.2, "cm"))) +
+    geom_text_repel(data = as.data.frame(summary(rda_ITS_soil)$biplot) %>% 
+                      rownames_to_column() %>%
+                      mutate(rowname = dplyr::recode(rowname, C.x = "C", N.x = "N", pH.2 = "pH", CN = "C:N", NO3.N = "NO3", NH4.N = "NH4")), 
+                    aes(x = dbRDA1, y = dbRDA2, label = rowname), 
+                    size = 4) -> p_ITS_soil
+
+plot.data <- merge(summary(rda_16S_rhizo)$sites, data.frame(sample_data(data_16S %>% subset_samples(sample_type == "Rhizosphere"))), by = "row.names") 
+
+ggplot() +
+    geom_point(data = plot.data, aes(x = dbRDA1, y = dbRDA2, fill = burn_severity), 
+               size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("dbRDA 1 (", round(100*as.data.frame(summary(rda_16S_rhizo)$cont)[2,1], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("dbRDA 2 (", round(100*as.data.frame(summary(rda_16S_rhizo)$cont)[2,2], 1)), "%)")) +
+    geom_segment(data = as.data.frame(summary(rda_16S_rhizo)$biplot), aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+                 size = 0.25, color = "black", arrow = arrow(length = unit(0.2, "cm"))) +
+    geom_text_repel(data = as.data.frame(summary(rda_16S_rhizo)$biplot) %>% 
+                      rownames_to_column() %>%
+                      mutate(rowname = dplyr::recode(rowname, C.x = "C", N.x = "N", pH.2 = "pH", CN = "C:N", NO3.N = "NO3", NH4.N = "NH4")), 
+                    aes(x = dbRDA1, y = dbRDA2, label = rowname), 
+                    size = 4) -> p_16S_rhizo
+plot.data <- merge(summary(rda_ITS_rhizo)$sites, data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Rhizosphere"))), by = "row.names") 
+
+ggplot() +
+    geom_point(data = plot.data, aes(x = dbRDA1, y = dbRDA2, fill = burn_severity), 
+               size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("dbRDA 1 (", round(100*as.data.frame(summary(rda_ITS_rhizo)$cont)[2,1], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("dbRDA 2 (", round(100*as.data.frame(summary(rda_ITS_rhizo)$cont)[2,2], 1)), "%)")) +
+    geom_segment(data = as.data.frame(summary(rda_ITS_rhizo)$biplot), aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+                 size = 0.25, color = "black", arrow = arrow(length = unit(0.2, "cm"))) +
+    geom_text_repel(data = as.data.frame(summary(rda_ITS_rhizo)$biplot) %>% 
+                      rownames_to_column() %>%
+                      mutate(rowname = dplyr::recode(rowname, C.x = "C", N.x = "N", pH.2 = "pH", CN = "C:N", NO3.N = "NO3", NH4.N = "NH4")), 
+                    aes(x = dbRDA1, y = dbRDA2, label = rowname), 
+                    size = 4) -> p_ITS_rhizo
+
+leg <- get_legend(p_16S_soil)
+prow <-plot_grid(p_16S_soil + theme(legend.position = "none"),
+                 p_ITS_soil + theme(legend.position = "none"),
+                 p_16S_rhizo + theme(legend.position = "none"),
+                 p_ITS_rhizo + theme(legend.position = "none"),
+                 align = "vh", ncol = 2, labels = "AUTO")
+prow2 <- plot_grid(prow, leg, ncol = 2, rel_widths = c(1, 0.2))
+
+png("Fig_4.png", res = 300, height = 4.5, width = 6.5, units = "in")
+prow2
+dev.off()
+
+plot.data <- merge(summary(rda_ITS_leaf)$sites, data.frame(sample_data(data_ITS %>% subset_samples(sample_type == "Leaf"))), by = "row.names") 
+
+ggplot() +
+    geom_point(data = plot.data, aes(x = dbRDA1, y = dbRDA2, fill = burn_severity), 
+               size = 3, alpha = 0.5, pch = 21) +
+    scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+    scale_x_continuous(name = paste0(paste0("dbRDA 1 (", round(100*as.data.frame(summary(rda_ITS_leaf)$cont)[2,1], 1)), "%)")) +
+    scale_y_continuous(name = paste0(paste0("dbRDA 2 (", round(100*as.data.frame(summary(rda_ITS_leaf)$cont)[2,2], 1)), "%)")) +
+    geom_segment(data = as.data.frame(summary(rda_ITS_leaf)$biplot), aes(x = 0, y = 0, xend = dbRDA1, yend = dbRDA2),
+                 size = 0.25, color = "black", arrow = arrow()) +
+    geom_text_repel(data = as.data.frame(summary(rda_ITS_leaf)$biplot) %>% 
+                      rownames_to_column() %>%
+                      mutate(rowname = dplyr::recode(rowname, C.y = "C", N.y = "N", pH.2 = "pH", CN = "C:N")), 
+                    aes(x = dbRDA1, y = dbRDA2, label = rowname), 
+                    size = 5) -> p_ITS_leaf
+
+png("Fig_S14.png", res = 300, height = 4.5, width = 6.5, units = "in")
+p_ITS_leaf
+dev.off()
+
+soil_chem %>%
+  group_by(sample_type, `Burn Severity`) %>%
+  dplyr::summarise(ph.mean = mean(`pH 2`), ph.se = sd(`pH 2`)/sqrt(n()),
+                   c.mean = mean(C), c.se = sd(C)/sqrt(n()),
+                   n.mean = mean(N), n.se = sd(N)/sqrt(n()),
+                   nh4.mean = mean(`NH4-N`), nh4.se = sd(`NH4-N`)/sqrt(n()),
+                   no3.mean = mean(`NO3-N`), no3.se = sd(`NO3-N`)/sqrt(n()))
+
+plant_chem %>%
+  group_by(sample_type, `Burn Severity`) %>%
+  mutate(`Burn Severity` = ordered(`Burn Severity`, c("Unburned", "Moderate", "High"))) %>%
+  mutate(sample_type = ordered(sample_type, c("Leaf", "Stem", "Coarse", "Fine root"))) %>%
+  dplyr::summarise(b.mean =  round(mean(B),  2), b.se =  round(sd(B)/sqrt(n()),  2),
+                   ca.mean = round(mean(Ca), 2), ca.se = round(sd(Ca)/sqrt(n()), 2),
+                   c.mean =  round(mean(C),  2), c.se =  round(sd(C)/sqrt(n()),  2),
+                   fe.mean = round(mean(Fe), 2), fe.se = round(sd(Fe)/sqrt(n()), 2),
+                   k.mean =  round(mean(K),  2), k.se =  round(sd(K)/sqrt(n()),  2),
+                   mg.mean = round(mean(Mg), 2), mg.se = round(sd(Mg)/sqrt(n()), 2),
+                   mn.mean = round(mean(Mn), 2), mn.se = round(sd(Mn)/sqrt(n()), 2),
+                   n.mean =  round(mean(N),  2), n.se =  round(sd(N)/sqrt(n()),  2),
+                   p.mean =  round(mean(P),  2), p.se =  round(sd(P)/sqrt(n()),  2),
+                   s.mean =  round(mean(S),  2), s.se =  round(sd(S)/sqrt(n()),  2),
+                   zn.mean = round(mean(Zn), 2), zn.se = round(sd(Zn)/sqrt(n()), 2)) %>%
+  mutate(B = paste0(b.mean, " (", b.se, ")"),
+         Ca = paste0(ca.mean, " (", ca.se, ")"),
+         C = paste0(c.mean, " (", c.se, ")"),
+         Fe = paste0(fe.mean, " (", fe.se, ")"),
+         K = paste0(k.mean, " (", k.se, ")"),
+         Mg = paste0(mg.mean, " (", mg.se, ")"),
+         Mn = paste0(mn.mean, " (", mn.se, ")"),
+         N = paste0(n.mean, " (", n.se, ")"),
+         P = paste0(p.mean, " (", p.se, ")"),
+         S = paste0(s.mean, " (", s.se, ")"),
+         Zn = paste0(zn.mean, " (", zn.se, ")")) %>%
+  dplyr::select(B, Ca, C, Fe, K, Mg, Mn, N, P, S, Zn, sample_type, `Burn Severity`) %>%
+  gather(key = "element", value =  "value", -sample_type, -`Burn Severity`) %>%
+  spread(key = `Burn Severity`, value = "value") -> table.S11
+```
+
+# Source Tracker Analysis set up (This can be skipped--just use data in repository)
+```{r}
+# 16S ---------------------------------------------------------------------------
+m_16S <- as.data.frame(as(sample_data(data_16S_counts), "matrix"))
+sinks_16S <- m_16S %>% filter(sample_type %in% c("Leaf", "Stem", "Fine root")) %>% rownames_to_column(var = "id")
+sources_16S <- merge(sinks_16S, m_16S %>% filter(sample_type %in% c("Rhizome", "Rhizosphere", "Bulk soil")),
+                   by = c("burn", "plot.num"), all.x = T) %>%
+  mutate(SampleID = sample.id.y, Env = sample_type.y, SourceSink = "Source") %>%
+  dplyr::select(SampleID, Env, SourceSink, id)
+
+FEAST_meta_16S <- rbind(sources_16S, sinks_16S %>% 
+                          mutate(SourceSink = "Sink", SampleID = sample.id, Env = sample_type) %>%
+                          dplyr::select(SampleID, Env, SourceSink, id))
+
+FEAST_meta_16S %>% group_by(id) %>% tally() 
+FEAST_meta_16S <- subset(FEAST_meta_16S, !(id %in% c("6", "40", "41", "4", "37", "36", "35", "34", "30", "29", "3")))
+
+write.table(FEAST_meta_16S, "FEAST_metadata_16S.txt", sep = "\t") # make sure ordering is correct
+
+set.seed(01221990)
+data_16S_2000_leaf <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Leaf"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_leaf) <- round(otu_table(data_16S_2000_leaf)*2000)
+
+set.seed(01221990)
+data_16S_2000_stem <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Stem"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_stem) <- round(otu_table(data_16S_2000_stem)*2000)
+
+set.seed(01221990)
+data_16S_2000_fine <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Fine root"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_fine) <- round(otu_table(data_16S_2000_fine)*2000)
+
+set.seed(01221990)
+data_16S_2000_rhizome <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Rhizome"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_rhizome) <- round(otu_table(data_16S_2000_rhizome)*2000)
+
+set.seed(01221990)
+data_16S_2000_Rhizosphere <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Rhizosphere"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_Rhizosphere) <- round(otu_table(data_16S_2000_Rhizosphere)*2000)
+
+set.seed(01221990)
+data_16S_2000_bulk <- phyloseq_mult_raref_avg(data_16S_counts %>% subset_samples(sample_type == "Bulk soil"),
+                                              SampSize = 2000, parallel = T)
+otu_table(data_16S_2000_bulk) <- round(otu_table(data_16S_2000_bulk)*2000)
+
+data_16S_2000 <- merge_phyloseq(data_16S_2000_leaf, data_16S_2000_stem, data_16S_2000_fine, 
+                                data_16S_2000_rhizome, data_16S_2000_Rhizosphere, data_16S_2000_bulk)
+
+otu <- as(otu_table(data_16S_2000), "matrix")
+
+write.table(otu, "FEAST_otus_16S.txt", sep = "\t")
+otus <- Load_CountMatrix(CountMatrix_path = "FEAST_otus_16S.txt")
+metadata <- Load_metadata(metadata_path = "FEAST_metadata_16S.txt") # make sure ordering is correct
+
+
+# To download FEAST: devtools::install_github("cozygene/FEAST", ref = "Nonunique_sources")
+set.seed(01221990)
+FEAST_output <- FEAST(C = otus, metadata = metadata, different_sources_flag = 1, dir_path = "/Feast_Output",
+                      outfile = "051820_16S")
+
+# ITS --------------------------------------------------------------
+m_ITS <- as.data.frame(as(sample_data(data_ITS_counts), "matrix"))
+sinks_ITS <- m_ITS %>% filter(sample_type %in% c("Leaf", "Stem", "Fine root")) %>% rownames_to_column(var = "id")
+sources_ITS <- merge(sinks_ITS, m_ITS %>% filter(sample_type %in% c("Rhizome", "Rhizosphere", "Bulk soil")),
+                   by = c("burn", "plot.num"), all.x = T) %>%
+  mutate(SampleID = sample.id.y, Env = sample_type.y, SourceSink = "Source") %>%
+  dplyr::select(SampleID, Env, SourceSink, id)
+
+FEAST_meta_ITS <- rbind(sources_ITS, sinks_ITS %>% 
+                          mutate(SourceSink = "Sink", SampleID = sample.id, Env = sample_type) %>%
+                          dplyr::select(SampleID, Env, SourceSink, id))
+
+FEAST_meta_ITS %>% group_by(id) %>% tally() %>% print(n = Inf)
+
+write.table(FEAST_meta_ITS, "FEAST_metadata_ITS.txt", sep = "\t") # make sure ordering is correct
+
+set.seed(01221990)
+data_ITS_1000_leaf <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Leaf"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_leaf) <- round(otu_table(data_ITS_1000_leaf)*1000)
+
+set.seed(01221990)
+data_ITS_1000_stem <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Stem"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_stem) <- round(otu_table(data_ITS_1000_stem)*1000)
+
+set.seed(01221990)
+data_ITS_1000_fine <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Fine root"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_fine) <- round(otu_table(data_ITS_1000_fine)*1000)
+
+set.seed(01221990)
+data_ITS_1000_rhizome <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Rhizome"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_rhizome) <- round(otu_table(data_ITS_1000_rhizome)*1000)
+
+set.seed(01221990)
+data_ITS_1000_Rhizosphere <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Rhizosphere"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_Rhizosphere) <- round(otu_table(data_ITS_1000_Rhizosphere)*1000)
+
+set.seed(01221990)
+data_ITS_1000_bulk <- phyloseq_mult_raref_avg(data_ITS_counts %>% subset_samples(sample_type == "Bulk soil"),
+                                              SampSize = 1000, parallel = T)
+otu_table(data_ITS_1000_bulk) <- round(otu_table(data_ITS_1000_bulk)*1000)
+
+data_ITS_1000 <- merge_phyloseq(data_ITS_1000_leaf, data_ITS_1000_stem, data_ITS_1000_fine, 
+                                data_ITS_1000_rhizome, data_ITS_1000_Rhizosphere, data_ITS_1000_bulk)
+
+otu <- as(otu_table(data_ITS_1000), "matrix")
+
+write.table(otu, "FEAST_otus_ITS.txt", sep = "\t")
+otus <- Load_CountMatrix(CountMatrix_path = "FEAST_otus_16S.txt")
+metadata <- Load_metadata(metadata_path = "FEAST_metadata_ITS.txt") # make sure ordering is correct
+
+FEAST_output <- FEAST(C = otus, metadata = metadata, different_sources_flag = 1, dir_path = "/FEAST_Output",
+                      outfile = "051520_ITS")
+```
+
+# Source Tracking stats and figs (Fig 4)
+```{r}
+# 16S ---------------------------------------------
+ST_16S <- read.delim("data/Feast_Output/051820_16S_source_contributions_matrix.txt")
+
+ST_16S_g <- ST_16S %>% rownames_to_column("Sink") %>% gather(key = "Source", value = "Proportion", -Sink) %>% na.omit()
+ST_16S_g$Source <- sapply(strsplit(as.character(ST_16S_g$Source), "[.]"), `[`, 2)
+ST_16S_g$ID <- sapply(strsplit(as.character(ST_16S_g$Sink), "_"), `[`, 1)
+
+ST_16S_g <- merge(ST_16S_g, m_16S, by.x = "ID", by.y = "sample.id", all.x = T)
+ST_16S_g$burn_severity <- ordered(ST_16S_g$burn_severity, c("Unburned", "Moderate", "High"))
+
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("Sink", "Source", "p-val")
+y <- data.frame(matrix(ncol = 3))
+colnames(y) <- c("Sink", "Source", "p-val")
+
+for(i in levels(as.factor(ST_16S_g$sample_type))){
+  sub <- subset(ST_16S_g, sample_type %in% i)
+  for(j in levels(as.factor(sub$Source))){
+    sub.sub <- subset(sub, Source %in% j)
+    x <- aov(Proportion ~ burn_severity, data = sub.sub)
+    y$Sink <- i
+    y$Source <- j
+    y$`p-val` <- p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], n = 9)
+    tab <- rbind(tab, y)
+  }
+} # none sig.
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_16S_g %>% filter(sample_type == "Stem" & Source != "<NA>"))
+shapiro.test(resid(x))
+summary(x) 
+TukeyHSD(x) 
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_16S_g %>% filter(sample_type == "Leaf"))
+shapiro.test(resid(x))
+summary(x) 
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_16S_g %>% filter(sample_type == "Fine root"))
+shapiro.test(resid(x))
+summary(x) 
+
+ST_16S_g %>%
+  filter(Source != "<NA>") %>%
+  group_by(plot, sample_type) %>%
+  summarise(sum.prop = sum(Proportion)) %>%
+  ungroup(plot) %>%
+  summarise(mean(sum.prop))
+
+# ITS --------------------------------------------------------------------------------------
+ST_ITS <- read.delim("data/FEAST_Output/051520_ITS_source_contributions_matrix.txt")
+
+ST_ITS_g <- ST_ITS %>% rownames_to_column("Sink") %>% gather(key = "Source", value = "Proportion", -Sink) %>% na.omit()
+ST_ITS_g$Source <- sapply(strsplit(as.character(ST_ITS_g$Source), "[.]"), `[`, 2)
+ST_ITS_g$ID <- sapply(strsplit(as.character(ST_ITS_g$Sink), "_"), `[`, 1)
+m_ITS$sample.id <- sapply(strsplit(as.character(m_ITS$sample.id), "_"), `[`, 1)
+ST_ITS_g <- merge(ST_ITS_g, m_ITS, by.x = "ID", by.y = "sample.id", all.x = T)
+ST_ITS_g$burn_severity <- ordered(ST_ITS_g$burn_severity, c("Unburned", "Moderate", "High"))
+
+tab <- data.frame(matrix(ncol = 3, nrow = 0))
+colnames(tab) <- c("Sink", "Source", "p-val")
+y <- data.frame(matrix(ncol = 3))
+colnames(y) <- c("Sink", "Source", "p-val")
+
+for(i in levels(as.factor(ST_ITS_g$Sink))){
+  sub <- subset(ST_ITS_g, Sink %in% i)
+  for(j in levels(as.factor(sub$Source))){
+    sub.sub <- subset(sub, Source %in% j)
+    x <- aov(Proportion ~ burn_severity, data = sub.sub)
+    y$Sink <- i
+    y$Source <- j
+    y$`p-val` <- p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], n = 9)
+    tab <- rbind(tab, y)
+  }
+} 
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_ITS_g %>% filter(sample_type == "Stem" & Source != "<NA>"))
+shapiro.test(resid(x))
+summary(x) 
+TukeyHSD(x) 
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_ITS_g %>% filter(sample_type == "Leaf"))
+shapiro.test(resid(x))
+summary(x) 
+TukeyHSD(x) 
+
+x <- aov(Proportion ~ burn_severity*Source, data = ST_ITS_g %>% filter(sample_type == "Fine root"))
+shapiro.test(resid(x))
+summary(x) 
+
+ST_ITS_g %>%
+  filter(Source != "<NA>") %>%
+  group_by(plot, sample_type) %>%
+  summarise(sum.prop = sum(Proportion)) %>%
+  ungroup(plot) %>%
+  summarise(mean(sum.prop))
+
+ST_ITS_g %>%
+  filter(Source == "rhizo" & sample_type != "Fine root" & burn_severity != "Unburned") %>%
+  summarise(sum.prop = mean(Proportion))
+
+# Plots ------------------------------------------------------------------------
+
+ST_16S_g$amplicon <- "16S"
+ST_ITS_g$amplicon <- "ITS"
+ST_plot_data <- rbind(ST_16S_g, ST_ITS_g)
+
+dummy <- data.frame(sample_type = c("Stem", "Stem", "Leaf", "Leaf", "Stem", "Stem"),
+                    amplicon =    c("16S",  "16S",  "ITS",  "ITS",  "ITS",  "ITS"),
+                    x =           c(0.6,    3.1,    0.5,    1.0,    0.5,    1.0),
+                    xend =        c(3,      3.5,    0.9,    3.4,    0.9,    3.4),
+                    y =           c(5.5,    18.7,   54,     22.5,   54,     22.5),
+                    yend =        c(5.5,    18.7,   54,     22.5,   54,     22.5))
+dummy$sample_type <- ordered(dummy$sample_type, c("Leaf", "Stem", "Fine root"))
+
+letters <- data.frame(sample_type = c("Stem", "Stem", "Stem", "Leaf", "Leaf", "Leaf", "Stem", "Stem", "Stem"),
+                      amplicon =    c("16S",  "16S",  "16S",  "ITS",  "ITS",  "ITS",  "ITS",  "ITS",  "ITS"),
+                      x =           c(1.8,    3.3,    1.2,    0.7,    2.2,    3.0,    0.7,    2.2,    3.0),
+                      y =           c(7.1,    20.0,   18.2,   58,     27.5,   55,     58,     27.5,   55),
+                      lab =         c("b", "a", "italic(p) < 0.05", "a", "b", "italic(p) < 0.05", "a", "b", "italic(p) < 0.05"))
+letters$sample_type <- ordered(letters$sample_type, c("Leaf", "Stem", "Fine root"))
+
+ST_plot_data %>% filter(Source != "<NA>") %>%
+  mutate(Source = dplyr::recode(Source, "soil" = "Bulk Soil", "coarse" = "Rhizome", "rhizo" = "Rhizosphere")) %>%
+  mutate(Source = ordered(Source, c("Rhizosphere", "Bulk Soil", "Rhizome"))) %>%
+  group_by(burn_severity, Source, sample_type, amplicon) %>%
+  dplyr::summarise(mean = mean(Proportion*100), se = sd(Proportion*100)/sqrt(n()), n = n()) %>%
+  ungroup(sample_type) %>%
+  mutate(sample_type = ordered(sample_type, c("Leaf", "Stem", "Fine root"))) %>%
+  ggplot(aes(x = burn_severity, y = mean, fill = Source, label = n)) +
+  geom_bar(stat = "identity", position = position_dodge(0.9)) +
+  geom_errorbar(aes(ymin = mean -se, ymax = mean + se), width = 0.2, position = position_dodge(0.9)) +
+  ylab("Source Percentage") +
+  xlab("Burn Severity") +
+  facet_grid(rows = vars(amplicon), cols = vars(sample_type),
+             labeller = labeller(amplicon = c("16S" = "Archaea & Bacteria", "ITS" = "Fungi")),
+             scales = "free") +
+  panel_border() +
+  geom_segment(data = dummy, aes(x = x, y = y, yend = yend, xend = xend), inherit.aes = F, color = "gray") +
+  geom_text(data = letters, aes(x = x, y = y, label = lab, vjust = 1), inherit.aes = F, parse = T) +
+  coord_cartesian() +
+  scale_fill_manual(values = c("#635237", "#c4954b", "#5fc44b")) +
+  theme(legend.position = c(0.01, 0.98), legend.justification = c(0,1), axis.text.x = element_text(size = 9)) -> p_ST
+
+png("~/Desktop/MCBurnRecovery/Figures/Fig_6.png", res = 300, height = 4.5, width = 6.5, units = "in")
+p_ST
+dev.off()
+```
+
+# Fungal guilds (Fig 5, S15 through S18)
+```{r}
+# Set up ------------------------------------------------
+fg <- parse_funguild()
+data_ITS_tax <- as.data.frame(as(tax_table(data_ITS), "matrix"))
+data_ITS_tax$Genus <- sapply(strsplit(as.character(data_ITS_tax$Genus), "__"), `[`, 2)
+data_ITS_tax$OTU <- rownames(data_ITS_tax)
+data_ITS_tax_fg <- merge(data_ITS_tax, 
+                         fg %>% filter(taxonomicLevel == "Genus"), 
+                         by.x = "Genus", by.y = "taxon", all.x = T)
+data_ITS_tax_fg$guild[str_detect(data_ITS_tax_fg$guild, "Ectomycorrhizal") == TRUE] <- "Ectomycorrhizal"
+data_ITS_tax_fg$guild[data_ITS_tax_fg$Family == "f__Glomeraceae"] <- "Arbuscular Mycorrhizal"
+data_ITS_tax_fg$guild[str_detect(data_ITS_tax_fg$guild, "athogen") == TRUE] <- "Pathogen"
+
+TAX <- tax_table(data_ITS_tax_fg)
+
+taxa_names(TAX) <- data_ITS_tax_fg$OTU
+data_ITS_fg <- merge_phyloseq(otu_table(data_ITS), TAX, data_ITS@sam_data)
+data_ITS_fg <- transform_sample_counts(data_ITS_fg, function(x) x/sum(x))
+
+data_ITS_EM   <- subset_taxa(data_ITS_fg, ta11 == "Ectomycorrhizal")
+data_ITS_AM   <- subset_taxa(data_ITS_fg, ta11 == "Arbuscular Mycorrhizal")
+data_ITS_PATH <- subset_taxa(data_ITS_fg, ta11 == "Pathogen")
+data_ITS_PATH <- subset_taxa(data_ITS_PATH, !(ta1 %in% c("Acremonium", "Ascophaera", "Aspergillus", "Athelia", 
+                                                       "Basidiobolus",
+                                                       "Candida", "Chaetomium", "Coniosporium", 
+                                                       "Cutaneotrichosporon", "Cyphellophora", "Cryptococcus",
+                                                       "Exophiala",
+                                                       "Malassezia", "Metarhizium", "Mycena",
+                                                       "Pseudogymnoascus", "Rhodotorula")))
+
+# EM -------------------------------------------
+## Abundance -------------------------------
+EM_melt <- psmelt(data_ITS_EM)
+EM_melt %>% filter(sample_type == "Fine root" | sample_type == "Rhizosphere" | sample_type == "Bulk soil") %>%
+  group_by(sample_type, burn_severity, plot) %>%
+  summarise(sum = sum(Abundance)*100) -> EM_sum
+
+model <- lme(sum ~ sample_type*burn_severity, random=~1|plot, data = EM_sum, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+for(i in levels(as.factor(as.character(EM_sum$sample_type)))){
+  x <- aov(sum ~ burn_severity, data = EM_sum %>% filter(sample_type %in% i))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 3))
+  print(summary(x)[[1]][[1,"F value"]])
+  #print(TukeyHSD(x))
+} 
+
+## Richness ------------------------------------
+data_ITS_fg_counts <- merge_phyloseq(otu_table(rare_ITS), TAX, data_ITS_counts@sam_data)
+data_ITS_EM_counts <- data_ITS_fg_counts %>% 
+  subset_taxa(ta11 == "Ectomycorrhizal") %>% 
+  subset_samples(sample_type == "Fine root" | sample_type == "Rhizosphere" | sample_type == "Bulk soil")
+
+rare_EM <- t(as(data_ITS_EM_counts@otu_table, "matrix"))
+rare_EM <- as.data.frame(rare_EM)
+
+rich_EM <- hill_taxa(rare_EM, q = 0)
+rich_EM <- merge(data_ITS_EM_counts@sam_data, rich_EM, by = 0)
+
+for(i in levels(as.factor(rich_EM$sample_type))){
+  x <- aov(y ~ burn_severity, data = rich_EM %>% filter(sample_type %in% i))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 3))
+  print(summary(x)[[1]][[1,"F value"]])
+  #print(TukeyHSD(x))
+} 
+
+shan_EM <- hill_taxa(rare_EM, q = 1)
+shan_EM <- merge(data_ITS_EM_counts@sam_data, shan_EM, by = 0)
+
+for(i in levels(as.factor(shan_EM$sample_type))){
+  x <- aov(y ~ burn_severity, data = shan_EM %>% filter(sample_type %in% i))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 3))
+  print(summary(x)[[1]][[1,"F value"]])
+  #print(TukeyHSD(x))
+} 
+
+invSimp_EM <- hill_taxa(rare_EM, q = 2)
+invSimp_EM <- merge(data_ITS_EM_counts@sam_data, invSimp_EM, by = 0)
+
+for(i in levels(as.factor(invSimp_EM$sample_type))){
+  x <- aov(y ~ burn_severity, data = invSimp_EM %>% filter(sample_type %in% i & y != Inf))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 3))
+  print(summary(x)[[1]][[1,"F value"]])
+  #print(TukeyHSD(x))
+} 
+
+## Composition ---------------------------------------------
+data_ITS_EM_rel <- transform_sample_counts(data_ITS_EM, function(x) x/sum(x))
+data_ITS_EM_rel <- subset_samples(data_ITS_EM_rel, 
+                                  sample_type %in% c("Fine root", "Rhizosphere", "Bulk soil") & 
+                                    sample.id != "U06-fine-ITS")
+
+df_16S <- data.frame(sample_data(data_ITS_EM_rel))
+set.seed(12290)
+OTU_16S <- t(as(data_ITS_EM_rel@otu_table, "matrix"))
+OTU_16S <- as.data.frame(OTU_16S)
+dist_16S <- vegdist(OTU_16S, "bray", na.rm = T)
+
+perm <- how(complete = TRUE, 
+            within   = Within(type = "none"),
+            plots    = with(df_16S, Plots(strata = plot, type = "free")))
+
+set.seed(01221990)
+mod <- adonis(dist_16S ~ sample_type*burn_severity, data = df_16S, permutations = 9999)
+
+# AMF ---------------------------------------------------------
+## Abundance -------------------------------
+AM_melt <- psmelt(data_ITS_AM)
+AM_melt %>% filter(sample_type %in% c("Fine root", "Rhizosphere", "Bulk soil")) %>%
+  group_by(sample_type, burn_severity, plot) %>%
+  summarise(sum = sum(Abundance)*100) -> AM_sum
+
+model <- lme(sum ~ sample_type*burn_severity, random=~1|plot, data = AM_sum, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = letters, adjust = "Tukey") 
+
+for(i in levels(as.factor(as.character(AM_sum$sample_type)))){
+  x <- aov(sum ~ burn_severity, data = AM_sum %>% filter(sample_type %in% i))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 3))
+  print(summary(x)[[1]][[1,"F value"]])
+  #print(TukeyHSD(x))
+} 
+
+# Pathogens -------------------------------------------------
+# Abundance ------------------------------------------------
+PATH_melt <- psmelt(data_ITS_PATH)
+PATH_melt %>% 
+  group_by(sample_type, burn_severity, plot) %>%
+  summarise(sum = sum(Abundance)*100) -> PATH_sum
+
+model <- lme(sum ~ sample_type*burn_severity, random=~1|plot, data = PATH_sum, method="REML")
+plot(model) 
+shapiro.test(resid(model)) 
+anova.lme(model, type="sequential", adjustSigma = T) 
+marginal <- lsmeans(model, ~"sample_type")
+cld(marginal, alpha = 0.05, Letters = c("a", "b", "c", "d", "e", "f", "g"), adjust = "Tukey") 
+
+for(i in levels(as.factor(PATH_sum$sample_type))){
+  x <- aov(sum ~ burn_severity, data = PATH_sum %>% filter(sample_type %in% i))
+  print(i)
+  print(p.adjust(summary(x)[[1]][[1,"Pr(>F)"]], "fdr", n = 6))
+  print(summary(x)[[1]][[1,"F value"]])
+  print(TukeyHSD(x))
+} 
+
+PATH_sum %>% filter(sample_type == "Leaf") %>% group_by(burn_severity) %>% summarise(mean = mean(sum))
+
+PATH_melt %>% 
+  filter(sample_type == "Leaf" & ta1 %in% c("Alternaria", "Cladosporium", "Erysiphe")) %>% 
+  #na.omit() %>%
+  group_by(burn_severity, ta1) %>% 
+  summarise(mean = mean(Abundance))
+
+# Plots -------------------------------------
+## Mycorrhizal richness & Abundance -------------
+mycorrhizal_abundance <- merge(EM_sum, AM_sum, by = c("sample_type", "plot", "burn_severity"))
+
+letters <- data.frame(letters = c("b", "a", "a"),
+                      x = c(1, 2, 3),
+                      y = c(0.07, 0.015, 0.015),
+                      sample_type = c("Bulk soil", "Bulk soil", "Bulk soil"),
+                      type = c("AM", "AM", "AM"))
+letters$sample_type <- ordered(letters$sample_type, c("Leaf", "Stem", "Fine root", "Rhizome", "Rhizosphere", "Bulk soil"))
+
+mycorrhizal_abundance %>%
+  gather(key = "type", value = "rel.abun", -sample_type, -plot, -burn_severity) %>%
+  mutate(type = dplyr::recode(type, sum.x = "EM", sum.y = "AM")) %>%
+  filter(sample_type %in% c("Fine root", "Rhizosphere", "Bulk soil")) %>%
+  group_by(sample_type, burn_severity, type) %>%
+  summarise(mean = mean(rel.abun), se = sd(rel.abun)/sqrt(n())) %>%
+  ggplot(aes(x = burn_severity, y = mean, fill = burn_severity)) +
+  geom_bar(stat = "identity", position = position_dodge(0.9)) +
+  geom_text(data =letters, aes(x = x, y = y, label = letters), inherit.aes = F) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+  xlab("Burn Severity") +
+  scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+  ylab("Relative Abundance (%)") +
+  theme(legend.position = "none", axis.text.x = element_text(size = 9)) +
+  panel_border() +
+  facet_grid(cols = vars(sample_type), rows = vars(type), scales = "free") -> p
+
+png("Fig_S17.png", res = 300, height = 4.5, width = 6.5, units = "in")
+p
+dev.off()
+
+EM_div <- rbind(rich_EM %>% mutate(index = "q = 0"),
+                shan_EM %>% mutate(index = "q = 1"),
+                invSimp_EM %>% filter(y!= Inf) %>%mutate(index = "q = 2"))
+
+EM_div %>%
+  filter(sample_type %in% c("Fine root", "Rhizosphere", "Bulk soil")) %>%
+  group_by(sample_type, burn_severity, index) %>%
+  summarise(mean = mean(y), se = sd(y)/sqrt(n())) %>%
+  ggplot(aes(x = burn_severity, y = mean, fill = burn_severity)) +
+  geom_bar(stat = "identity", position = position_dodge(0.9)) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2) +
+  xlab("Burn Severity") +
+  scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+  ylab("Hills number") +
+  theme(legend.position = "none", axis.text.x = element_text(size = 9)) +
+  panel_border() +
+  facet_grid(cols = vars(sample_type), rows = vars(index), scales = "free") -> p
+
+png("Fig_S18.png", res = 300, height = 6.5, width = 6.5, units = "in")
+p
+dev.off()
+
+## EM Genera -----------------------------------------------
+genus_sum_ITS <- tapply(taxa_sums(data_ITS_EM_rel), 
+                         tax_table(data_ITS_EM_rel)[, "ta1"], sum, na.rm=TRUE)
+top10genus_ITS <- names(sort(genus_sum_ITS, TRUE))[1:11]
+
+abundant_ITS_genus <- subset_taxa(data_ITS_EM_rel, ta1 %in% top10genus_ITS)
+abundant_ITS_genus_glom <- tax_glom(abundant_ITS_genus, taxrank = "ta1")
+abundant_ITS_genus_melt <- psmelt(abundant_ITS_genus_glom)
+
+sum2 <- abundant_ITS_genus_melt %>% 
+  filter(ta1 != "g__unidentified") %>%
+  group_by(sample_type, ta1, burn_severity) %>%
+  dplyr::summarise(means = mean(Abundance))
+
+#Fix names
+#sum2$ta1 <- sapply(strsplit(as.character(sum2$ta1), "__"), `[`, 2)
+
+#Everything that's left is considered rare  
+rare <- sum2 %>%
+  group_by(sample_type, burn_severity) %>%
+  dplyr::summarise(means = 1- sum(means)) %>%
+  mutate(ta1 = "Other")
+
+#concatenate the datasets
+sum2 = rbind(sum2, rare)
+
+#order groups
+sum2$ta1 <- forcats::fct_relevel(sum2$ta1, "Other", after = Inf)
+
+toexpr<-function(x) {
+  getfun <- function(x) {
+    ifelse(x=="Other", "plain", "italic")
+  }
+  as.expression(unname(Map(function(f,v) substitute(f(v), list(f=as.name(f), v=as.character(v))), getfun(x), x)))
+}
+
+fig.S16 <- ggplot(sum2, aes(x = burn_severity, y = means, fill = ta1)) +
+    geom_bar(position = "stack", stat = "identity", col = "black") +
+    facet_wrap(~sample_type, ncol = 3) +
+    scale_fill_manual(values = c("#ff7f0e","#1f77b4", "yellow",  "#2ca02c", "#d62728", 
+                                 "#9467bd", "#8c564b", "#e377c2",  "#17becf", 
+                                 "#7f7f7f", "#b5e62e", "white"),
+                      labels = toexpr(levels(sum2$ta1))) +
+    scale_y_continuous(name = NULL, breaks = NULL) +
+    scale_x_discrete(name = "Burn severity") +
+    panel_border() +
+    theme(strip.text = element_text(size = 10), axis.text.x = element_text(size = 10),
+          axis.title.y = element_blank(), legend.position = "bottom", legend.title = element_blank(),
+          legend.justification = "center", legend.text.align = 0) +
+    guides(fill = guide_legend(ncol = 3)) 
+
+png("Fig_S10.png", res = 300, height = 6, width = 6.5, units = "in")
+fig.S16
+dev.off()
+
+## Pathogen abundance
+letters <- data.frame(sample_type = c("Leaf", "Leaf", "Leaf", "Leaf"),
+                      label = c("a", "ab", "b", "italic(p) < 0.05"),
+                      x = c(1, 2, 3, 1),
+                      y = c(16, 28, 43, 40))
+letters$sample_type <- ordered(letters$sample_type, c("Leaf", "Stem", "Fine root", "Rhizome", "Rhizosphere", "Bulk soil"))
+
+PATH_melt %>% 
+  group_by(sample_type, burn_severity, plot) %>%
+  summarise(sum = sum(Abundance)*100) -> PATH_sum # sum of pathogens per plot
+
+PATH_sum %>%
+  group_by(burn_severity, sample_type) %>%
+  summarise(mean = mean(sum), se = sd(sum)/sqrt(n())) %>%
+  ggplot(aes(x = burn_severity, y = mean, fill = burn_severity)) +
+  geom_bar(stat = "identity", position = position_dodge(0.9)) +
+  geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.2, position = position_dodge()) +
+  scale_fill_manual(values =  c("grey", "orange", "#BF2F38")) +
+  xlab("Burn Severity") +
+  ylab("Relative Abundance (%)") +
+  geom_text(data = letters, aes(x = x, y = y, label = label), inherit.aes = F, parse = T) +
+  theme(legend.position = "none", axis.text.x = element_text(size = 9)) +
+  panel_border() +
+  #coord_cartesian(ylim = c(0, 45)) +
+  facet_wrap(~sample_type, scales = "free") -> fig.S15
+
+png("Fig_S15.png", res = 300, height = 4, width = 6.5, units = "in")
+fig.S15
+dev.off()
+
+
+
+TEST <- PATH_melt %>%
+  group_by(burn_severity, sample_type, plot, ta1) %>%
+  summarise(sum = sum(Abundance)*100) # sum of each pathogen in each plot
+
+errors <- PATH_sum %>% 
+  filter(sample_type == "Leaf") %>%
+  group_by(burn_severity) %>%
+  summarise(me = mean(sum), se = sd(sum)/sqrt(n()))
+
+TEST2 <- TEST %>% filter(sample_type == "Leaf") %>%
+  group_by(burn_severity, sample_type, ta1) %>%
+  summarise(mean = mean(sum))
+
+TEST2$ta1[!(TEST2$ta1 %in% c("Alternaria", "Cladosporium", "Erysiphe"))] <- "Other"
+
+TEST2 %>% group_by(burn_severity, ta1) %>% summarise(mean(mean))
+
+TEST2 %>%
+  ggplot(aes(x = burn_severity, y = mean, fill = ta1)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_errorbar(data = errors, aes(ymin = me - se, ymax = me + se, x = burn_severity), 
+                inherit.aes = F, width = 0.2, position = position_dodge()) +
+  scale_fill_manual(values =  c("#20639B", "#3CAEA3", "#F6D55C", "gray"),
+                    labels = c(expression(italic("Alternaria")), expression(italic("Cladosporium")), 
+                               expression(italic("Erysiphe")), "Other")) +
+  xlab("Burn Severity") +
+  ylab("Relative Abundance (%)") +
+  geom_text(data = letters, aes(x = x, y = y, label = label), inherit.aes = F, parse = T) +
+  theme(legend.position = "bottom", legend.text.align = 0) +
+  coord_cartesian(ylim = c(0, 45)) +
+  guides(fill = guide_legend(ncol = 2)) -> fig
+
+png("fig_5.png", res = 300, height = 4, width = 3.25, units = "in")
+fig
+dev.off()
+```
+
+# Spatial Autocorrelation
+```{r}
+# Geo set-up --------------------------------
+
+geo <- read.csv("data/plot_locations.csv")
+geo <- geo[-16,]
+geo$plot <- sapply(strsplit(as.character(geo$name), " "), `[`, 2)
+geo$plot[!(substr(geo$plot,1,1) == 1)] <- paste0("0", geo$plot[!(substr(geo$plot,1,1) == 1)])
+geo$plot[geo$plot == 1] <- "01"
+geo$burn <- substr(geo$name, 1, 1)
+geo$name2 <- paste0(geo$burn, geo$plot)
+row.names(geo) <- geo$name2
+high <- geo %>% filter(description == "High Burn") %>%dplyr::select(lat, long)
+mod <- geo %>% filter(description == "Moderate Burn") %>%dplyr::select(lat, long)
+unburn <- geo %>% filter(description == "Unburn") %>%dplyr::select(lat, long)
+
+geo_dist_high <- geodist(high)
+geo_dist_mod <- geodist(mod)
+geo_dist_unburn <- geodist(unburn)
+
+rownames(geo_dist_high) <- rownames(high)
+colnames(geo_dist_high) <- rownames(high)
+rownames(geo_dist_mod) <- rownames(mod)
+colnames(geo_dist_mod) <- rownames(mod)
+rownames(geo_dist_unburn) <- rownames(unburn)
+colnames(geo_dist_unburn) <- rownames(unburn)
+
+geo_dist_high <- data.frame(as.table(geo_dist_high))[lower.tri(geo_dist_high, diag = FALSE), ]
+geo_dist_mod <- data.frame(as.table(geo_dist_mod))[lower.tri(geo_dist_mod, diag = FALSE), ]
+geo_dist_unburn <- data.frame(as.table(geo_dist_unburn))[lower.tri(geo_dist_unburn, diag = FALSE), ]
+
+# 16S ----------------------------------
+high_plots <- list()
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "High") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_high, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  high_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "High") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_high, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+}
+
+mod_plots <- list()
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "Moderate") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_mod, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  mod_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "Moderate") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_mod, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+} #stem sig for mod.
+
+unburn_plots <- list()
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "Unburned") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_unburn, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  unburn_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_16S@sam_data$sample_type))){
+  sub <- data_16S %>% subset_samples(sample_type %in% i & burn_severity == "Unburned") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_unburn, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+} # Rhizome sig. for unburn
+
+prow_high <- plot_grid(plotlist = high_plots, align = "vh", ncol = 1)
+title <- textGrob("High", gp = gpar(fontface = "bold", fontsize = 20))
+prow_high <- grid.arrange(arrangeGrob(prow_high, top = title))
+
+prow_mod <- plot_grid(plotlist = mod_plots, align = "vh", ncol = 1)
+title <- textGrob("Moderate", gp = gpar(fontface = "bold", fontsize = 20))
+prow_mod <- grid.arrange(arrangeGrob(prow_mod, top = title))
+
+prow_unburn <- plot_grid(plotlist = unburn_plots, align = "vh", ncol = 1)
+title <- textGrob("Unburned", gp = gpar(fontface = "bold", fontsize = 20))
+prow_unburn <- grid.arrange(arrangeGrob(prow_unburn, top = title))
+
+prow <- plot_grid(prow_unburn, prow_mod, prow_high, ncol = 3)
+y_axis <- textGrob("Bray Dissimilarity", gp = gpar(fontsize = 12), rot = 90)
+x_axis <- textGrob("Geographic Distance (m)", gp = gpar(fontsize = 12))
+prow <- plot_grid(grid.arrange(arrangeGrob(prow, left = y_axis, bottom = x_axis)))
+
+png("Fig_S9.png", res = 300, height = 9, width = 6.5, units = "in")
+prow
+dev.off()
+
+# Fungi --------------------------------------------
+
+high_plots <- list()
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "High") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_high, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  high_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "High") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_high, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+}
+
+mod_plots <- list()
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "Moderate") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_mod, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  mod_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "Moderate") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_mod, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+} # rhizo for moderate sig.
+
+unburn_plots <- list()
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "Unburned") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_unburn, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  
+  p <- ggplot(test, aes(x = Freq, y = value)) +
+    geom_point() +
+    labs(x = NULL, y = NULL, title = i) +
+    scale_x_continuous(breaks = c(25, 50, 75, 100)) +
+    coord_cartesian(xlim = c(20, 120))
+  unburn_plots[[i]] <- p
+}
+
+for(i in levels(as.factor(data_ITS@sam_data$sample_type))){
+  sub <- data_ITS %>% subset_samples(sample_type %in% i & burn_severity == "Unburned") 
+  sample_names(sub) <- sub@sam_data$plot
+  sub_dist <- phyloseq::distance(sub, "bray")
+  sub_dist <- melt(as.matrix(sub_dist))
+  
+  test <- merge(geo_dist_unburn, sub_dist, by = c("Var1", "Var2"), all.x = T)
+  print(i)
+  rho <- cor.test(test$value, test$Freq, method = "spearman")
+  print(p.adjust(rho[3], method = "fdr", n = 18))
+  print(rho[4])
+} # rhizo and rhizome for unburn sig.
+
+prow_high <- plot_grid(plotlist = high_plots, align = "vh", ncol = 1)
+title <- textGrob("High", gp = gpar(fontface = "bold", fontsize = 20))
+prow_high <- grid.arrange(arrangeGrob(prow_high, top = title))
+
+prow_mod <- plot_grid(plotlist = mod_plots, align = "vh", ncol = 1)
+title <- textGrob("Moderate", gp = gpar(fontface = "bold", fontsize = 20))
+prow_mod <- grid.arrange(arrangeGrob(prow_mod, top = title))
+
+prow_unburn <- plot_grid(plotlist = unburn_plots, align = "vh", ncol = 1)
+title <- textGrob("Unburned", gp = gpar(fontface = "bold", fontsize = 20))
+prow_unburn <- grid.arrange(arrangeGrob(prow_unburn, top = title))
+
+prow <- plot_grid(prow_unburn, prow_mod, prow_high, ncol = 3)
+y_axis <- textGrob("Bray Dissimilarity", gp = gpar(fontsize = 12), rot = 90)
+x_axis <- textGrob("Geographic Distance (m)", gp = gpar(fontsize = 12))
+prow <- plot_grid(grid.arrange(arrangeGrob(prow, left = y_axis, bottom = x_axis)))
+
+png("Fig_S13.png", res = 300, height = 9, width = 6.5, units = "in")
+prow
+dev.off()
+```
+
+
