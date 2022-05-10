@@ -8,7 +8,7 @@ Nicholas C. Dove<sup>1</sup>, Dawn M. Klingeman<sup>1</sup>, Alyssa A. Carrell<s
 
 In review.
 
-- Raw data can be found in the Sequence Read Archive under project ID <a href="https://www.ncbi.nlm.nih.gov/bioproject/622552">622552</a>.
+- Raw data can be found in the Sequence Read Archive under project ID <a href="https://www.ncbi.nlm.nih.gov/bioproject/PRJNA673381">673381</a>.
 
 - Or use my pre-made feature, taxonomy, and metadata tables found in this repository
 
